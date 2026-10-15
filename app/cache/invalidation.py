@@ -3,6 +3,8 @@
 Provides helper functions to clear cached data when underlying data
 changes.
 
+Invalidation is skipped when caching is disabled.
+
 All invalidation functions handle errors gracefully - cache failures
 are logged but don't prevent the operation from succeeding. This ensures
 the app continues functioning (with stale cache) if the cache backend
@@ -15,6 +17,7 @@ from fastapi_cache import FastAPICache
 from redis.exceptions import RedisError
 
 from app.cache.constants import CacheNamespaces
+from app.config.settings import get_settings
 from app.logs import LogCategory, category_logger
 
 
@@ -37,6 +40,9 @@ async def invalidate_user_cache(user_id: int) -> None:
         Cache failures are logged but don't raise exceptions. The app
         continues with stale cache until TTL expires.
     """
+    if not get_settings().cache_enabled:
+        return
+
     try:
         # Clear /users/me style cache (namespace: "user:{user_id}")
         namespace = CacheNamespaces.USER_ME_FORMAT.format(user_id=user_id)
@@ -74,6 +80,9 @@ async def invalidate_users_list_cache() -> None:
     Note:
         Cache failures are logged but don't raise exceptions.
     """
+    if not get_settings().cache_enabled:
+        return
+
     try:
         await FastAPICache.clear(namespace=CacheNamespaces.USERS_LIST)
         category_logger.info("Cleared users list cache", LogCategory.CACHE)
@@ -103,6 +112,9 @@ async def invalidate_api_keys_cache(user_id: int) -> None:
     Note:
         Cache failures are logged but don't raise exceptions.
     """
+    if not get_settings().cache_enabled:
+        return
+
     try:
         namespace = CacheNamespaces.API_KEYS_LIST_FORMAT.format(user_id=user_id)
         await FastAPICache.clear(namespace=namespace)
@@ -138,6 +150,9 @@ async def invalidate_user_related_caches(user_id: int) -> None:
         cache invalidation failures don't prevent other caches from being
         cleared. The app continues with stale cache until TTL expires.
     """
+    if not get_settings().cache_enabled:
+        return
+
     await asyncio.gather(
         invalidate_user_cache(user_id),
         invalidate_users_list_cache(),
@@ -164,6 +179,9 @@ async def invalidate_namespace(namespace: str) -> None:
         Cache failures are logged but don't raise exceptions. The app
         continues with stale cache until TTL expires.
     """
+    if not get_settings().cache_enabled:
+        return
+
     try:
         await FastAPICache.clear(namespace=namespace)
         category_logger.info(

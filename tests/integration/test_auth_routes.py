@@ -4,6 +4,7 @@ import logging
 
 import pytest
 from fastapi import status
+from fastapi_cache import FastAPICache
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -97,6 +98,31 @@ class TestAuthRoutes:
         assert user_from_db.role == RoleType.user
 
         mock_send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_register_with_cache_disabled(
+        self, client: AsyncClient, test_db: AsyncSession, mocker
+    ) -> None:
+        """Registration succeeds when caching has never been initialized."""
+        mocker.patch(self.email_fn_to_patch)
+        settings = mocker.patch("app.cache.invalidation.get_settings")
+        settings.return_value.cache_enabled = False
+        mocker.patch.object(FastAPICache, "_backend", None)
+        mocker.patch.object(FastAPICache, "_prefix", None)
+
+        post_body = {
+            "email": "cache-disabled@testuser.com",
+            "first_name": "Test",
+            "last_name": "User",
+            "password": "test12345!",
+        }
+        response = await client.post(self.register_path, json=post_body)
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert set(response.json()) == {"token", "refresh"}
+        user = await UserManager.get_user_by_email(post_body["email"], test_db)
+        assert user is not None
+        assert user.verified is False
 
     @pytest.mark.asyncio
     async def test_register_duplicate_user(

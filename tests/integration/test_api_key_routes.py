@@ -5,6 +5,7 @@ from uuid import UUID
 
 import pytest
 from fastapi import status
+from fastapi_cache import FastAPICache
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,6 +66,35 @@ class TestApiKeyRoutes:
         assert data["is_active"] is True
         assert data["scopes"] == ["read:users", "write:users"]
         assert isinstance(UUID(data["id"]), UUID)
+
+    @pytest.mark.asyncio
+    async def test_api_key_mutations_with_cache_disabled(
+        self, client: AsyncClient, test_db: AsyncSession, mocker
+    ) -> None:
+        """Creating, updating and deleting keys need no cache backend."""
+        user = User(**self.get_test_user())
+        test_db.add(user)
+        await test_db.commit()
+        headers = {"Authorization": f"Bearer {AuthManager.encode_token(user)}"}
+        settings = mocker.patch("app.cache.invalidation.get_settings")
+        settings.return_value.cache_enabled = False
+        mocker.patch.object(FastAPICache, "_backend", None)
+        mocker.patch.object(FastAPICache, "_prefix", None)
+
+        created = await client.post(
+            API_KEY_ROUTE, json={"name": "No cache"}, headers=headers
+        )
+        assert created.status_code == status.HTTP_200_OK
+        key_url = f"{API_KEY_ROUTE}/{created.json()['id']}"
+
+        updated = await client.patch(
+            key_url, json={"name": "Renamed"}, headers=headers
+        )
+        assert updated.status_code == status.HTTP_200_OK
+        assert updated.json()["name"] == "Renamed"
+
+        deleted = await client.delete(key_url, headers=headers)
+        assert deleted.status_code == status.HTTP_204_NO_CONTENT
 
     @pytest.mark.asyncio
     async def test_list_api_keys(

@@ -1,6 +1,6 @@
 """Unit tests for cache module (decorators, key builders, invalidation)."""
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from inspect import Parameter, signature
 from unittest.mock import AsyncMock, MagicMock
 
@@ -15,6 +15,7 @@ from app.cache.invalidation import (
     invalidate_api_keys_cache,
     invalidate_namespace,
     invalidate_user_cache,
+    invalidate_user_related_caches,
     invalidate_users_list_cache,
 )
 from app.cache.key_builders import (
@@ -298,6 +299,31 @@ class TestKeyBuilders:
 @pytest.mark.unit
 class TestInvalidationFunctions:
     """Test cache invalidation functions."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("invalidate", "args"),
+        [
+            (invalidate_user_cache, (123,)),
+            (invalidate_users_list_cache, ()),
+            (invalidate_api_keys_cache, (123,)),
+            (invalidate_user_related_caches, (123,)),
+            (invalidate_namespace, ("products:123",)),
+        ],
+    )
+    async def test_disabled_cache_needs_no_backend(
+        self,
+        mocker: MockerFixture,
+        invalidate: Callable[..., Awaitable[None]],
+        args: tuple[int | str, ...],
+    ) -> None:
+        """Disabled invalidation must work without FastAPICache.init()."""
+        settings = mocker.patch("app.cache.invalidation.get_settings")
+        settings.return_value.cache_enabled = False
+        mocker.patch.object(FastAPICache, "_backend", None)
+        mocker.patch.object(FastAPICache, "_prefix", None)
+
+        await invalidate(*args)
 
     @pytest.mark.asyncio
     async def test_invalidate_user_cache_success(
