@@ -1,0 +1,293 @@
+[project]
+name = "api-template"
+version = "0.9.0"
+description = "Run 'api-admin custom metadata' to change this information."
+authors = [{ name = "Grant Ramsay", email = "seapagan@gmail.com" }]
+license = "MIT"
+license-files = ["LICENSE.txt"]
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+classifiers = ["Private :: Do Not Upload"]
+dependencies = [
+  "alembic>=1.19.1",
+  "anyio>=4.14.2",
+  "async-timeout==5.0.1 ; python_version < '3.12'",
+  "asyncpg>=0.31.0",
+  "click>=8.4.2",
+  "email-validator>=2.3.0",
+  "fastapi[standard]>=0.141.1",
+  "pydantic>=2.13.4",
+  "pydantic-settings>=2.15.0",
+  "prometheus-fastapi-instrumentator>=8.1.0",
+  "pyjwt>=2.13.0",
+  "python-decouple>=3.8",
+  "rich>=15.0.0",
+  "rtoml>=0.13.0",
+  "jinja2>=3.1.6",
+  "fastapi-mail>=1.6.8",
+  "httpx>=0.28.1",
+  "uvicorn[standard]>=0.52.4",
+  "sqlalchemy[asyncio]>=2.0.52",
+  "typer>=0.27.1",
+  "libpass[bcrypt]>=1.9.3",
+  "bcrypt>=5.0.0",
+  "sqladmin[full]>=0.31.0",
+  "fastapi-pagination>=0.15.16",
+  "loguru>=0.7.3",
+  "fastapi-cache2[redis]>=0.2.2",
+  "slowapi>=0.1.10",
+  "starlette>=1.6.0",
+]
+
+[project.scripts]
+api-admin = "app.api_admin:app"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+exclude-newer = "3 days"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "app"
+
+[dependency-groups]
+dev = [
+  "aiosmtpd>=1.4.6",
+  "aiosqlite>=0.22.1",
+  "faker>=40.37.0",
+  "mock>=5.2.0",
+  "mypy>=2.3.1",
+  "poethepoet>=0.48.0",
+  "pyfakefs>=6.2.0",
+  "pymarkdownlnt>=0.9.39",
+  "pytest==9.1.1",
+  "pytest-asyncio>=1.4.0",
+  "pytest-clarity>=1.0.1",
+  "pytest-cov>=7.1.0",
+  "pytest-env>=1.7.0",
+  "pytest-mock>=3.15.1",
+  "pytest-randomly>=4.1.0",
+  "pytest-reverse>=1.9.0",
+  "pytest-sugar>=1.1.1",
+  "pytest-watcher>=0.6.3",
+  "ruff>=0.16.4",
+  "mkdoc>=0.1",
+  "mkdocs-git-revision-date-localized-plugin>=1.5.4",
+  "mkdocs-latest-git-tag-plugin>=0.1.2",
+  "mkdocs-material>=9.7.7",
+  "mkdocs-minify-plugin>=0.8.0",
+  "pymdown-extensions>=11.0.1",
+  "pygments>=2.21.0",
+  "types-passlib>=1.7.7.20260211",
+  "asyncpg-stubs>=0.31.3",
+  "github-changelog-md>=0.9.9",
+  "mkdocstrings[python]>=1.0.6",
+  "mkdocs-swagger-ui-tag",
+  "ty>=0.0.74",
+  "prek>=0.4.14",
+  "types-redis>=4.6.0.20241004",
+  "pytest-xdist>=3.8.0",
+  "types-markdown>=3.10.2.20260712",
+  "zizmor==1.29.0",                                   # Keep in sync with .github/workflows/zizmor.yml.
+]
+
+[tool.uv.sources]
+mkdocs-swagger-ui-tag = { git = "https://github.com/seapagan/mkdocs-swagger-ui-tag", rev = "fad9a8940bb7544aec63c378319f57b9a443fbaa" }
+
+
+[tool.poe.tasks]
+# setup PoeThePoet tasks
+pre.cmd = "prek run --all-files"
+pre.help = "Run pre commit checks using prek"
+mypy.cmd = "mypy . --strict"
+mypy.help = "Run mypy checks"
+format.help = "Format code with Ruff"
+format.cmd = "ruff format ."
+ruff.help = "Run Ruff checks"
+ruff.cmd = "ruff check --output-format=concise ."
+markdown.cmd = "pymarkdown --strict-config scan  -r docs/**/*.md"
+markdown.help = "Run markdown checks"
+
+# testing tasks
+test.help = "Run all tests using Pytest"
+test.cmd = "pytest"
+"test:unit".help = "Run only Unit tests using Pytest"
+"test:unit".cmd = "pytest -m unit"
+"test:integration".help = "Run only Integration tests using Pytest"
+"test:integration".cmd = "pytest -m integration"
+"test:skipped".cmd = "pytest --quiet --collect-only -m skip --no-cov"
+"test:skipped".help = "Show skipped tests without running all tests"
+
+# zizmor task to check github actions
+# currently the deafult invocation fails d/t our prek config. We ignore the prek
+# config check for now until the fixed version is released.
+zizmor.help = "Check all GitHub actions using 'zizmor'"
+zizmor.cmd = "zizmor --persona=pedantic --collect=workflows,actions ."
+
+# Add 'ty' type checker - this is still beta software and has false positives
+# compared to 'mypy', but suspect it will exentually replace it.
+ty.help = "Run the 'ty' type-checker (Alpha pre-release version)"
+ty.cmd = "ty check --output-format concise"
+
+# run all linting checks in sequence. we want to run them all, even if one fails
+lint.ignore_fail = "return_non_zero"
+lint.sequence = ["format", "ruff", "mypy", "ty", "markdown"]
+lint.help = "Run all linting checks"
+
+# documentation tasks
+"docs:publish".cmd = "mkdocs gh-deploy"
+"docs:publish".help = "Publish documentation to GitHub Pages"
+"docs:build".cmd = "mkdocs build"
+"docs:build".help = "Build documentation locally to './site' folder"
+"docs:serve".cmd = "mkdocs serve -w TODO.md -w CHANGELOG.md -w CONTRIBUTING.md"
+"docs:serve".help = "Serve documentation locally"
+"docs:serve:all".cmd = "mkdocs serve -w TODO.md -w CHANGELOG.md -w CONTRIBUTING.md -a 0.0.0.0:8000"
+"docs:serve:all".help = "Serve documentation locally on all interfaces"
+
+# regenerate the openapi.json file
+openapi.cmd = "api-admin docs openapi --prefix=docs/reference"
+openapi.help = "Generate an OpenAPI JSON file from this API"
+
+# generate the CHANGELOG.md file
+changelog.cmd = "github-changelog-md"
+changelog.help = "Generate the CHANGELOG.md file"
+
+
+# configure assorted tools and linters
+[tool.pymarkdown]
+plugins.md014.enabled = false
+plugins.md046.enabled = false
+plugins.md033.allowed_elements = "!--,![CDATA[,!DOCTYPE,swagger-ui"
+plugins.md013.enabled = false
+
+[tool.ruff]
+line-length = 80
+src = ["app"]
+extend-exclude = [
+  "app/migrations", # auto-generated by alembic so we don't need to check them
+]
+target-version = "py310" # minimum python version supported
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"
+
+[tool.ruff.lint]
+select = ["ALL"] # we are being very strict!
+ignore = [
+  "PGH003",
+  "FBT002",
+  "FBT003",
+  "B006",
+] # These rules are too strict even for us 😝
+extend-ignore = [
+  "COM812", # ignored for ruff formatting
+  "ISC001", # ignored for ruff formatting
+  "T201",   # temporary ignore for now, will remove when migrate to logging
+  "CPY001", # file license headers are overkill for an O/S project
+]
+
+[tool.ruff.lint.pep8-naming]
+classmethod-decorators = ["pydantic.validator", "pydantic.root_validator"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.extend-per-file-ignores]
+"tests/**/*.py" = [
+  "S101",    # we can (and MUST!) use 'assert' in test files.
+  "ANN001",  # annotations for fixtures are sometimes a pain for test files.
+  "ARG001",  # sometimes fixtures are not physically used but have side-effects
+  "ARG002",  # as above
+  "TD003",
+  "FIX002",
+  "RUF012",
+  "SLF001",  # sometimes tests need to access private members
+  "PLE1205", # false positive: CategoryLogger has different signature than logging.Logger
+]
+"app/managers/auth.py" = ["ERA001"]
+"app/resources/auth.py" = ["ERA001"]
+
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+  "fastapi.Depends",
+  "fastapi.params.Depends",
+  "fastapi.Query",
+  "fastapi.params.Query",
+]
+
+[tool.ruff.lint.flake8-builtins]
+builtins-ignorelist = ["id"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = true
+
+[tool.mypy]
+python_version = "3.10"
+exclude = ["app/migrations/", "site/"]
+
+[[tool.mypy.overrides]]
+disable_error_code = ["method-assign", "no-untyped-def", "attr-defined"]
+module = "tests.*"
+
+[[tool.mypy.overrides]]
+ignore_missing_imports = true
+module = "decouple.*"
+
+[tool.pytest.ini_options]
+addopts = [
+  "-m",
+  "not rewrite",  # mark tests 'rewrite' that need work, and they wont be run
+  "-n",
+  "logical",
+  "--cov",
+  "--cov-report",
+  "term-missing",
+  "--cov-report",
+  "html",
+]
+filterwarnings = [
+  "ignore:'crypt' is deprecated:DeprecationWarning",
+  "ignore:ValidatedEmail.email is deprecated:DeprecationWarning",
+  "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:slowapi.extension",
+]
+markers = [
+  "unit: Unit tests",
+  "integration: Integration tests",
+  "rewrite: Tests need Rewriting",
+]
+testpaths = ["tests"]
+mock_use_standalone_module = true
+env = [
+  "I_READ_THE_DAMN_DOCS=true",
+  "ADMIN_PAGES_ENABLED=true",
+  "CACHE_ENABLED=true",
+  "LOG_FILENAME=test_api.log",
+  "METRICS_ENABLED=True",
+  "RATE_LIMIT_ENABLED=false",
+]
+
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["*/tests/*"]
+concurrency = ["thread", "greenlet"]
+patch = ["subprocess"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+include = ["app"]
+exclude = ["app/migrations"]
+reportMissingImports = true
+reportMissingTypeStubs = true
+pythonVersion = "3.10"
+typeCheckingMode = "basic"

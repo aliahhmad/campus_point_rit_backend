@@ -1,0 +1,348 @@
+"""Control the app settings, including reading from a .env file."""
+
+from __future__ import annotations
+
+import os
+import sys
+from functools import lru_cache
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
+from urllib.parse import quote
+
+from cryptography.fernet import Fernet
+from pydantic import Field, SecretStr, ValidationInfo, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.config.helpers import get_project_root
+from app.logs import logger
+
+if TYPE_CHECKING:  # pragma: no cover
+    from collections.abc import Callable
+
+try:
+    from .metadata import custom_metadata
+except ModuleNotFoundError:  # pragma: no cover
+    logger.error(
+        "The metadata file could not be found, it may have been deleted."
+    )
+    logger.error("Please run 'api-admin custom init' to regenerate defaults.")
+    sys.exit(1)
+
+# Security validation constants
+MIN_SECRET_KEY_LENGTH = 32
+
+
+def unwrap_secret(value: SecretStr | str) -> str:
+    """Return the raw value from either a SecretStr or plain string."""
+    if isinstance(value, SecretStr):
+        return value.get_secret_value()
+    return value
+
+
+class Settings(BaseSettings):
+    """Main Settings class.
+
+    This allows to set some defaults, that can be overwritten from the .env
+    file if it exists.
+
+    SECURITY WARNING: Critical settings (SECRET_KEY, DB_PASSWORD, DB_USER)
+    MUST be configured via environment variables, a .env file, or an optional
+    secrets directory. The application will fail to start if these are not
+    properly configured with secure values.
+
+    Do NOT put real passwords in this file. For local development, use the
+    .env file instead (it's in .gitignore and won't be stored in Git).
+
+    To get started, copy .env.example to .env and update the values.
+    """
+
+    project_root: Path = get_project_root()
+
+    env_file: str = str(project_root / ".env")
+    model_config = SettingsConfigDict(env_file=env_file)
+
+    base_url: str = "http://localhost:8000"
+    frontend_url: str | None = None
+    api_root: str = ""
+    no_root_route: bool = False
+
+    cors_origins: str = "*"
+
+    # Setup the Postgresql database.
+    # IMPORTANT: Set DB_USER and DB_PASSWORD in your .env file!
+    db_user: str = "CHANGE_ME_IN_ENV_FILE"
+    db_password: SecretStr = SecretStr("CHANGE_ME_IN_ENV_FILE")
+    db_address: str = "localhost"
+    db_port: str = "5432"
+    db_name: str = "api-template"
+
+    test_with_postgres: bool = False
+
+    # Setup the TEST Postgresql database.
+    # Note: Safe defaults for local/CI testing only
+    test_db_user: str = "test_user"
+    test_db_password: SecretStr = SecretStr("test_password_local_only")
+    test_db_address: str = "localhost"
+    test_db_port: str = "5432"
+    test_db_name: str = "api-template-test"
+
+    # JWT secret Key - CRITICAL SECURITY SETTING
+    # Generate with: openssl rand -hex 32
+    # Or Python: import secrets; secrets.token_hex(32)
+    # Set SECRET_KEY in your .env file!
+    secret_key: SecretStr = SecretStr("CHANGE_ME_IN_ENV_FILE")
+    access_token_expire_minutes: int = 120
+
+    # Custom Metadata
+    api_title: str = custom_metadata.title
+    api_description: str = custom_metadata.description
+    repository: str = custom_metadata.repository
+    contact: dict[str, str] = custom_metadata.contact
+    license_info: dict[str, str] = custom_metadata.license_info
+    year: str = custom_metadata.year
+
+    # email settings
+    # Note: Set these in .env for production email functionality
+    # Email features will fail gracefully if not configured
+    mail_username: str = ""
+    mail_password: SecretStr = SecretStr("")
+    mail_from: str = ""
+    mail_port: int = 587
+    mail_server: str = "mail.server.com"
+    mail_from_name: str = "FASTAPI Template"
+    mail_starttls: bool = True
+    mail_ssl_tls: bool = False
+    mail_use_credentials: bool = True
+    mail_validate_certs: bool = True
+
+    # admin pages settings
+    admin_pages_enabled: bool = False
+    admin_pages_route: str = "/admin"
+    admin_pages_title: str = "API Administration"
+    admin_pages_encryption_key: SecretStr = Field(
+        default_factory=lambda: SecretStr(Fernet.generate_key().decode()),
+        description="Encryption key for admin session tokens",
+    )
+    admin_pages_timeout: int = 86400
+
+    # Logging settings
+    log_path: str = "./logs"
+    log_level: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    log_rotation: str = "1 day"  # "500 MB", "1 week", etc.
+    log_retention: str = "30 days"
+    log_compression: str = "zip"
+    log_categories: str = (
+        "ALL"  # ALL, NONE, or comma-separated: REQUESTS,AUTH,DATABASE
+    )
+    log_filename: str = "api.log"
+    log_console_enabled: bool = False
+
+    # Prometheus metrics settings (opt-in, disabled by default)
+    metrics_enabled: bool = False
+
+    # Cache settings (opt-in, disabled by default)
+    cache_enabled: bool = False
+    # Redis backend settings (when cache_enabled=True)
+    # Falls back to in-memory cache if redis_enabled=False
+    redis_enabled: bool = False
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_password: SecretStr = SecretStr("")
+    redis_db: int = 0
+    cache_default_ttl: int = 300  # 5 minutes
+
+    # Rate limiting settings (opt-in, disabled by default)
+    # Automatically uses Redis when both rate_limit_enabled and
+    # redis_enabled are True
+    rate_limit_enabled: bool = False
+
+    # gatekeeper settings!
+    # this is to ensure that people read the damn instructions and changelogs
+    i_read_the_damn_docs: bool = False
+
+    @property
+    def redis_url(self) -> str:
+        """Generate Redis connection URL from settings.
+
+        Returns:
+            Redis URL in format: redis://[password@]host:port/db
+
+        Note:
+            Password is URL-encoded to handle special characters safely.
+        """
+        redis_password = unwrap_secret(self.redis_password)
+        if redis_password:
+            encoded_password = quote(redis_password, safe="")
+            return (
+                f"redis://:{encoded_password}@"
+                f"{self.redis_host}:{self.redis_port}/{self.redis_db}"
+            )
+        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+
+    @property
+    def rate_limit_storage_url(self) -> str:
+        """Generate rate limit storage URL.
+
+        Returns Redis URL when both redis_enabled and rate_limit_enabled
+        are True, otherwise returns empty string to trigger in-memory
+        storage.
+
+        Returns:
+            Redis URL for rate limiting or empty string for in-memory.
+        """
+        if self.rate_limit_enabled and self.redis_enabled:
+            return self.redis_url
+        return ""
+
+    @field_validator("api_root")
+    @classmethod
+    def check_api_root(cls: type[Settings], value: str) -> str:
+        """Ensure the api_root does not end with a slash."""
+        if value and value.endswith("/"):
+            return value[:-1]
+        return value
+
+    @field_validator("secret_key")
+    @classmethod
+    def validate_secret_key(cls: type[Settings], value: SecretStr) -> SecretStr:
+        """Ensure secret key is not a weak or default value."""
+        raw_value = unwrap_secret(value)
+        weak_keys = [
+            "CHANGE_ME_IN_ENV_FILE",
+            "32DigitsofSecretNumbers",
+            "CHANGE_ME",
+            "secret",
+            "secretkey",
+        ]
+        if raw_value.lower() in [k.lower() for k in weak_keys]:
+            msg = (
+                "\n"
+                "=" * 70 + "\n"
+                "SECURITY ERROR: SECRET_KEY is using a weak/default value!\n"
+                "=" * 70 + "\n"
+                "Generate a strong key with one of these commands:\n"
+                "  openssl rand -hex 32\n"
+                "  python -c 'import secrets; print(secrets.token_hex(32))'\n\n"
+                "Then configure it via environment, .env, or secrets dir:\n"
+                "  SECRET_KEY=your_generated_key_here\n"
+                "=" * 70
+            )
+            raise ValueError(msg)
+        if len(raw_value) < MIN_SECRET_KEY_LENGTH:
+            msg = (
+                f"SECRET_KEY must be at least {MIN_SECRET_KEY_LENGTH} "
+                f"characters for security. Current length: {len(raw_value)}"
+            )
+            raise ValueError(msg)
+        return value
+
+    @field_validator("admin_pages_encryption_key", mode="before")
+    @classmethod
+    def validate_admin_pages_encryption_key(
+        cls: type[Settings], value: SecretStr | str | None
+    ) -> SecretStr | str:
+        """Generate admin encryption key when configured value is empty."""
+        if value is None:
+            return SecretStr(Fernet.generate_key().decode())
+
+        if not unwrap_secret(value):
+            return SecretStr(Fernet.generate_key().decode())
+
+        return value
+
+    @field_validator("db_password", "test_db_password")
+    @classmethod
+    def validate_db_password(
+        cls: type[Settings],
+        value: SecretStr,
+        info: ValidationInfo,
+    ) -> SecretStr:
+        """Ensure database password is not a weak or default value."""
+        raw_value = unwrap_secret(value)
+        field_name = (info.field_name or "db_password").upper()
+        if not raw_value.strip():
+            msg = (
+                "\n"
+                "=" * 70 + "\n"
+                f"SECURITY ERROR: {field_name} must not be empty!\n"
+                "=" * 70 + "\n"
+                "Set a strong database password via environment, .env, "
+                "or secrets dir:\n"
+                f"  {field_name}=your_secure_password_here\n"
+                "=" * 70
+            )
+            raise ValueError(msg)
+        weak_passwords = [
+            "CHANGE_ME_IN_ENV_FILE",
+            "Sup3rS3cr3tP455w0rd",
+            "CHANGE_ME",
+            "password",
+            "admin",
+        ]
+        if raw_value in weak_passwords:
+            msg = (
+                "\n"
+                "=" * 70 + "\n"
+                f"SECURITY ERROR: {field_name} is using a weak/default value!\n"
+                "=" * 70 + "\n"
+                "Set a strong database password via environment, .env, "
+                "or secrets dir:\n"
+                f"  {field_name}=your_secure_password_here\n"
+                "=" * 70
+            )
+            raise ValueError(msg)
+        return value
+
+    @field_validator("db_user")
+    @classmethod
+    def validate_db_user(cls: type[Settings], value: str) -> str:
+        """Ensure database user is not a default value."""
+        if value == "CHANGE_ME_IN_ENV_FILE":
+            msg = (
+                "\n"
+                "=" * 70 + "\n"
+                "CONFIGURATION ERROR: DB_USER is not set!\n"
+                "=" * 70 + "\n"
+                "Set your database username via environment, .env, "
+                "or secrets dir:\n"
+                "  DB_USER=your_database_username\n"
+                "=" * 70
+            )
+            raise ValueError(msg)
+        return value
+
+
+def check_secrets_dir() -> list[str]:
+    """Validate SECRETS_DIR and return warning messages.
+
+    Returns a list of warning strings (empty if no issues found).
+    Intended to be called from the application lifespan, after
+    logging is configured.
+    """
+    warnings: list[str] = []
+    secrets_dir = os.getenv("SECRETS_DIR", "").strip()
+    if not secrets_dir:
+        return warnings
+
+    secrets_path = Path(secrets_dir)
+    if not secrets_path.is_dir():
+        warnings.append(
+            "SECRETS_DIR is set but does not exist or is not a "
+            "directory. File-based secrets will not be loaded."
+        )
+    elif os.access(secrets_path, os.W_OK):
+        warnings.append(
+            "SECRETS_DIR is writable by the current process. "
+            "For best security, this directory should be read-only."
+        )
+    return warnings
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return the current settings."""
+    secrets_dir = os.getenv("SECRETS_DIR", "").strip()
+    settings_factory = cast("Callable[..., Settings]", Settings)
+    if secrets_dir and Path(secrets_dir).is_dir():
+        return settings_factory(_secrets_dir=secrets_dir)
+    return settings_factory()
