@@ -448,11 +448,14 @@ class AuthManager:
             background_tasks,
             EmailTemplateSchema(
                 recipients=[NameEmail(name=user.first_name, email=user.email)],
-                subject=f"{get_settings().api_title} - Password Reset",
+                subject=f"Reset your password | {get_settings().api_title}",
                 body={
                     "name": user.first_name,
                     "application": get_settings().api_title,
-                    "base_url": get_settings().base_url,
+                    "base_url": (
+                        get_settings().frontend_url or get_settings().base_url
+                    ).rstrip("/"),
+                    "expiry_minutes": RESET_TOKEN_EXPIRE_MINUTES,
                     "reset_token": reset_token,
                 },
                 template_name="password_reset.html",
@@ -611,11 +614,15 @@ class AuthManager:
             background_tasks,
             EmailTemplateSchema(
                 recipients=[NameEmail(user_full_name, user_data.email)],
-                subject=f"Welcome to {get_settings().api_title}!",
+                subject=f"Verify your email | {get_settings().api_title}",
                 body={
                     "application": f"{get_settings().api_title}",
                     "user": user_data.email,
-                    "base_url": get_settings().base_url,
+                    "base_url": (
+                        get_settings().frontend_url or get_settings().base_url
+                    ).rstrip("/"),
+                    "name": user_full_name,
+                    "expiry_minutes": VERIFY_TOKEN_EXPIRE_MINUTES,
                     "verification": AuthManager.encode_verify_token(user_data),
                 },
                 template_name="welcome.html",

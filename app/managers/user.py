@@ -20,7 +20,7 @@ from app.database.helpers import (
     verify_password,
 )
 from app.logs import LogCategory, category_logger
-from app.managers.auth import AuthManager
+from app.managers.auth import VERIFY_TOKEN_EXPIRE_MINUTES, AuthManager
 from app.managers.email import EmailManager
 from app.metrics import increment_login_attempt
 from app.models.enums import RoleType
@@ -150,11 +150,15 @@ class UserManager:
                 background_tasks,
                 EmailTemplateSchema(
                     recipients=[NameEmail(user_full_name, new_user["email"])],
-                    subject=f"Welcome to {get_settings().api_title}!",
+                    subject=f"Verify your email | {get_settings().api_title}",
                     body={
                         "application": f"{get_settings().api_title}",
                         "user": new_user["email"],
-                        "base_url": get_settings().base_url,
+                        "base_url": (
+                            get_settings().frontend_url
+                            or get_settings().base_url
+                        ).rstrip("/"),
+                        "expiry_minutes": VERIFY_TOKEN_EXPIRE_MINUTES,
                         "name": user_full_name,
                         "verification": AuthManager.encode_verify_token(
                             user_do

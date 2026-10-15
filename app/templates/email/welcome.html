@@ -1,15 +1,17 @@
-{#
-  Template : 'welcome.html'
-  Purpose  : This is sent as an email when a new User registers.
+{% extends "base.html" %}
+{% set action_url = base_url ~ '/verify?code=' ~ (verification | urlencode) %}
 
-  This is a very basic template, with no attempt at styling. Note that for HTML
-  email, all styles must be INLINE.
-#}
+{% block title %}Verify your email | {{ application }}{% endblock %}
+{% block preheader %}Welcome to {{ application }}. Verify your email to activate your account.{% endblock %}
+{% block heading %}A little closer to your campus.{% endblock %}
 
-<p>Hello <strong>{{ name }}</strong>, Welcome to <strong>{{ application }}</strong>!</p>
-<p>Please click the link below to <strong>verify your Email address</strong>.
-You will be unable to access the API before doing this.</p>
+{% block content %}
+<p style="margin: 0 0 16px;">Welcome to {{ application }}, your campus connection for the RIT community.</p>
+<p style="margin: 0;">Verify your email address to activate your account. Then you can sign in and make yourself at home.</p>
+{% endblock %}
 
-<a href="{{ base_url }}/verify?code={{ verification }}">Verify my Email!</a>
+{% block action_label %}Verify email address{% endblock %}
 
-<p>This code will expire after 10 minutes.</p>
+{% block instructions %}
+<p style="margin: 0; color: #646a72; font-size: 14px;">If you didn’t create a {{ application }} account, you can ignore this email.</p>
+{% endblock %}
