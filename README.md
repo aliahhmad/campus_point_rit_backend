@@ -17,6 +17,10 @@ docker compose ps
 Campus API docs: <http://localhost:8001/docs>.
 Points API docs: <http://localhost:8003/docs>.
 
+Account creation calls Points to create a wallet and its one-time 100-point
+grant before registration succeeds. See
+[wallet initialization](docs/development/wallets.md) for setup and verification.
+
 The authentication foundation comes from the FastAPI template documented below.
 
 ## FastAPI Application Template

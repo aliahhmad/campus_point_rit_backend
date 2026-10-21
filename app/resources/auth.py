@@ -64,7 +64,7 @@ async def register(
     request: Request,  # noqa: ARG001 - Required by slowapi decorator
     background_tasks: BackgroundTasks,
     user_data: UserRegisterRequest,
-    session: Annotated[AsyncSession, Depends(get_database)],
+    session: Annotated[AsyncSession, Depends(get_database, scope="function")],
 ) -> dict[str, str]:
     """Register a new User and return a JWT token plus a Refresh Token.
 

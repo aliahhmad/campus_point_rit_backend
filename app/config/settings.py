@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     base_url: str = "http://localhost:8000"
     frontend_url: str | None = None
     points_api_url: str = "http://localhost:8003"
+    points_service_token: SecretStr = SecretStr("")
     api_root: str = ""
     no_root_route: bool = False
 

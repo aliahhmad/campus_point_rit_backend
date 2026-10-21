@@ -3,7 +3,15 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,7 +23,15 @@ class PointsTransaction(Base):
     """Record a positive points amount once per logical operation."""
 
     __tablename__ = "points_transactions"
-    __table_args__ = (CheckConstraint("amount > 0", name="amount_positive"),)
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="amount_positive"),
+        Index(
+            "uq_points_transactions_opening_grant_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("type = 'opening_grant'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     # Callers reuse the operation ID when retrying the same operation.

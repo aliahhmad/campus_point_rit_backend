@@ -58,6 +58,7 @@ services:
       POINTS_DB_NAME: ${POINTS_DB_NAME:-campuspoint_points}
       POINTS_DB_ADDRESS: points-db
       POINTS_DB_PORT: "5432"
+      POINTS_SERVICE_TOKEN: ${POINTS_SERVICE_TOKEN:?Set POINTS_SERVICE_TOKEN in .env}
     # Published on loopback for local Swagger access; React still uses Campus.
     ports:
       - "127.0.0.1:8003:8003"
