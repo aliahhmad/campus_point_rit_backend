@@ -4,7 +4,9 @@ CampusPoint runs four development containers: `campus-api`, `points-api`,
 `campus-db`, and `points-db`. The existing `app/` routes are the Campus API;
 `app/points/` contains the separate Points API and its own database metadata.
 
-From this directory, start Colima and then the services:
+For first-time setup, follow [Load campus locations](docs/development/locations.md)
+to apply migrations and import the bundled CSV before starting the APIs and
+frontend. For later runs, start Colima and the services from this directory:
 
 ```console
 colima start

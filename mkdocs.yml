@@ -89,6 +89,7 @@ nav:
       - Continuous Integration: development/ci.md
       - With a Local Server: development/local.md
       - With Docker: development/docker.md
+      - Load Campus Locations: development/locations.md
       - Documentation: development/documentation.md
   - Project Organization: project-organization.md
   - Tutorials: tutorials.md
