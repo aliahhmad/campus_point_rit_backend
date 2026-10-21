@@ -1,4 +1,23 @@
-# FastAPI Application Template <!-- omit in toc -->
+# CampusPoint backend <!-- omit in toc -->
+
+CampusPoint runs four development containers: `campus-api`, `points-api`,
+`campus-db`, and `points-db`. The existing `app/` routes are the Campus API;
+`app/points/` contains the separate Points API and its own database metadata.
+
+From this directory, start Colima and then the services:
+
+```console
+colima start
+docker compose up --build -d --wait
+docker compose ps
+```
+
+Campus API docs: <http://localhost:8001/docs>.
+Points API docs: <http://localhost:8003/docs>.
+
+The authentication foundation comes from the FastAPI template documented below.
+
+## FastAPI Application Template
 
 ![GitHub Release](https://img.shields.io/github/v/release/seapagan/fastapi-template)
 [![Ruff](https://github.com/seapagan/fastapi-template/actions/workflows/ruff.yml/badge.svg)](https://github.com/seapagan/fastapi-template/actions/workflows/ruff.yml)
@@ -243,13 +262,13 @@ docker compose down
 First run migrations:
 
 ```console
-docker compose run --rm api alembic upgrade head
+docker compose exec campus-api alembic upgrade head
 ```
 
 Run containers:
 
 ```console
-docker compose run --rm --service-ports api uvicorn --host 0.0.0.0 main:app --reload
+docker compose up -d campus-api points-api
 ```
 
 To rebuild image (dependency updates):
@@ -263,7 +282,8 @@ docker compose build
 Running migrations on Docker container is also possible:
 
 ```console
-docker compose run --rm api alembic upgrade head
+docker compose exec campus-api alembic upgrade head
+docker compose exec points-api alembic -c alembic-points.ini upgrade head
 ```
 
 ### Testing on containers
@@ -271,7 +291,8 @@ docker compose run --rm api alembic upgrade head
 Running tests on Docker container is also possible:
 
 ```console
-docker compose run --rm api pytest
+docker compose exec campus-api python -m pytest
+docker compose exec points-api python -m pytest tests_points -o addopts='' -q
 ```
 
 ## Planned Functionality and Known Bugs
