@@ -13,7 +13,11 @@ async def test_profile_points_after_request(workflow: Workflow) -> None:
     root = get_settings().api_root
     before = await workflow.client.get(root + "/wallet/me")
     assert before.status_code == status.HTTP_200_OK
-    assert before.json() == {"user_id": 1, "available_points": 100}
+    assert before.json() == {
+        "user_id": 1,
+        "available_points": 100,
+        "reputation": 0,
+    }
     created = await workflow.client.post(
         root + "/requests",
         json={
@@ -26,4 +30,8 @@ async def test_profile_points_after_request(workflow: Workflow) -> None:
     assert created.status_code == status.HTTP_201_CREATED, created.text
     after = await workflow.client.get(root + "/wallet/me")
     assert after.status_code == status.HTTP_200_OK
-    assert after.json() == {"user_id": 1, "available_points": 95}
+    assert after.json() == {
+        "user_id": 1,
+        "available_points": 95,
+        "reputation": 0,
+    }

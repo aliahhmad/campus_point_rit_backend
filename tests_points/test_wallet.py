@@ -25,7 +25,9 @@ def test_read_existing_wallet(
     )
     session = AsyncMock(spec=AsyncSession)
     session.get.return_value = (
-        Wallet(user_id=7, available_points=95) if exists else None
+        Wallet(user_id=7, available_points=95, reputation=12)
+        if exists
+        else None
     )
 
     async def database() -> AsyncGenerator[AsyncMock, None]:
@@ -44,7 +46,11 @@ def test_read_existing_wallet(
     session.execute.assert_not_awaited()
     if exists:
         assert response.status_code == status.HTTP_200_OK
-        assert response.json() == {"user_id": 7, "available_points": 95}
+        assert response.json() == {
+            "user_id": 7,
+            "available_points": 95,
+            "reputation": 12,
+        }
     else:
         assert response.status_code == status.HTTP_404_NOT_FOUND
 

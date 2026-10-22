@@ -23,10 +23,12 @@ async def read_wallet(
     user_id: Annotated[int, Path(gt=0, le=2_147_483_647)],
     session: Annotated[AsyncSession, Depends(get_database)],
 ) -> WalletResponse:
-    """Return the balance to an authenticated service caller."""
+    """Return points and reputation to an authenticated service caller."""
     wallet = await get_wallet(user_id, session)
     return WalletResponse(
-        user_id=wallet.user_id, available_points=wallet.available_points
+        user_id=wallet.user_id,
+        available_points=wallet.available_points,
+        reputation=wallet.reputation,
     )
 
 

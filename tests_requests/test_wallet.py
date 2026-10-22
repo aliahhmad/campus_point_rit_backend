@@ -13,7 +13,15 @@ from app.managers.security import get_current_user
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "case",
-    ["balance", "zero", "wrong_owner", "invalid_balance", "outage", "timeout"],
+    [
+        "balance",
+        "zero",
+        "wrong_owner",
+        "invalid_balance",
+        "invalid_reputation",
+        "outage",
+        "timeout",
+    ],
 )
 async def test_wallet_proxy(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch, case: str
@@ -27,6 +35,7 @@ async def test_wallet_proxy(
         "available_points": 0
         if case == "zero"
         else (-1 if case == "invalid_balance" else 95),
+        "reputation": -1 if case == "invalid_reputation" else 0,
     }
 
     def respond(request: httpx.Request) -> httpx.Response:

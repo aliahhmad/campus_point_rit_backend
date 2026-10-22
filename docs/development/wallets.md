@@ -39,16 +39,17 @@ Startup applies Points migration `points_0003`, which enforces one opening
 grant per user. Existing accounts in this workspace have already been funded
 once. No startup scan or backfill command is needed.
 
-## Profile points
+## Profile points and reputation
 
-The frontend's **My profile** page shows the current available balance in
-**My points**. It loads the balance when the page opens and provides a
-**Refresh points** button. Wallet failures show a retry action without hiding
+The frontend's **My profile** page shows the current available balance and
+reputation in **My points and reputation**. It loads both when the page opens
+and provides a **Refresh** button. Wallet failures show a retry action without hiding
 the rest of the profile.
 
 The browser calls authenticated `GET /wallet/me` in Campus. Campus derives the
 user ID from the session and calls `GET /internal/wallets/{user_id}` in Points
-using `X-Service-Token`. The response contains `user_id` and `available_points`.
+using `X-Service-Token`. The response contains `user_id`, `available_points`, and
+`reputation`.
 The browser never receives the internal service token. These GET endpoints
 only read existing wallets; they do not create wallets or issue opening grants.
 
