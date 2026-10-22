@@ -18,8 +18,11 @@ description are checked against `MODERATION_BLOCKED_WORDS`, a comma-separated
 setting with a starter list of common abusive words. Matching ignores case and
 uses literal whole words, so punctuation around a word still matches, but a
 substring inside a longer word does not. Requests without matches are saved as
-`visible`; matches remain `pending` for review. This is a basic word check and
-does not detect every form of abuse or deliberate spelling obfuscation.
+`visible`; matches are saved as `hidden`. Only a failed moderation check returns
+`pending`: the error is logged and request creation continues with content
+accessible only to its owner. The check runs locally; database and Points service
+errors retain their existing transaction behavior. This is a basic word check
+and does not detect every form of abuse or deliberate spelling obfuscation.
 
 Override the list in `backend/.env` and restart Campus, for example:
 

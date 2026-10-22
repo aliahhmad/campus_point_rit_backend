@@ -84,8 +84,9 @@ uses FastAPI's standard 422 errors, and authentication uses the existing 401.
 7. The public API returns the created request only after both acknowledgements.
    Campus checks the title and description against `MODERATION_BLOCKED_WORDS`
    before insertion. Requests without matches are saved as `visible`; matches
-   remain `pending` and are accessible only to their owner. The feed also waits
-   for the coordinator to record a finished COMMIT before displaying a request.
+   are saved as `hidden`. Only failures in the moderation check produce `pending`.
+   Hidden and pending requests are accessible only to their owner. The feed also
+   waits for a finished COMMIT before displaying a request.
 
 The participant GID includes the service, transaction UUID, and a hash of the
 validated payload. Repeated messages can verify their identity even while

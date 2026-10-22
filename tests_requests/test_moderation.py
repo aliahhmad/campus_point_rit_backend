@@ -1,6 +1,6 @@
 """Check automatic approval and the status saved during request creation."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import asyncpg
@@ -17,14 +17,14 @@ from app.transactions.schemas import RequestPreparation
     ("title", "description", "expected"),
     [
         ("Library crowding", "Are there seats?", ModerationStatus.visible),
-        ("SHIT!", "Are there seats?", ModerationStatus.pending),
-        ("Library crowding", "This is shit.", ModerationStatus.pending),
-        ("Library crowding", "A fucking mess", ModerationStatus.pending),
-        ("Library crowding", "You are an asshole", ModerationStatus.pending),
+        ("SHIT!", "Are there seats?", ModerationStatus.hidden),
+        ("Library crowding", "This is shit.", ModerationStatus.hidden),
+        ("Library crowding", "A fucking mess", ModerationStatus.hidden),
+        ("Library crowding", "You are an asshole", ModerationStatus.hidden),
         ("Class assignment", "Please assist me", ModerationStatus.visible),
         ("A scunthorpe visit", "A classic", ModerationStatus.visible),
         ("Library crowding", "shitake mushrooms", ModerationStatus.visible),
-        ("Library crowding", "Stop\nshit\nnow", ModerationStatus.pending),
+        ("Library crowding", "Stop\nshit\nnow", ModerationStatus.hidden),
     ],
 )
 def test_auto_moderation(
@@ -43,13 +43,13 @@ def test_auto_moderation(
 @pytest.mark.parametrize(
     ("words", "text", "expected"),
     [
-        ("  ShIt , , ", "SHIT!", ModerationStatus.pending),
+        ("  ShIt , , ", "SHIT!", ModerationStatus.hidden),
         ("", "shit", ModerationStatus.visible),
         (" , , ", "shit", ModerationStatus.visible),
-        ("customword", "customword", ModerationStatus.pending),
+        ("customword", "customword", ModerationStatus.hidden),
         ("customword", "shit", ModerationStatus.visible),
         ("bad.word", "badXword", ModerationStatus.visible),
-        ("bad.word", "bad.word!", ModerationStatus.pending),
+        ("bad.word", "bad.word!", ModerationStatus.hidden),
     ],
 )
 def test_configured_blocklist(
@@ -63,16 +63,47 @@ def test_configured_blocklist(
     assert auto_moderate_request("Library", text) is expected
 
 
+@pytest.mark.parametrize(
+    ("target", "error"),
+    [
+        ("get_settings", OSError("Moderation unavailable")),
+        ("get_settings", TimeoutError("Moderation timed out")),
+        ("re.search", RuntimeError("Moderation check failed")),
+    ],
+)
+def test_moderation_failure_returns_pending(
+    monkeypatch: pytest.MonkeyPatch, target: str, error: Exception
+) -> None:
+    """A failed check leaves content unpublished instead of approving it."""
+    monkeypatch.setattr(get_settings(), "moderation_blocked_words", "shit")
+    monkeypatch.setattr(
+        f"app.managers.moderation.{target}", Mock(side_effect=error)
+    )
+    assert auto_moderate_request("Library", "Are there seats?") is (
+        ModerationStatus.pending
+    )
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("moderation_fails", [False, True])
 @pytest.mark.parametrize(
     ("description", "expected"),
-    [("Are there seats?", "visible"), ("This is SHIT!", "pending")],
+    [("Are there seats?", "visible"), ("This is SHIT!", "hidden")],
 )
 async def test_creation_saves_moderation_status(
-    monkeypatch: pytest.MonkeyPatch, description: str, expected: str
+    monkeypatch: pytest.MonkeyPatch,
+    description: str,
+    expected: str,
+    *,
+    moderation_fails: bool,
 ) -> None:
     """The actual insertion path persists the server's moderation decision."""
     monkeypatch.setattr(get_settings(), "moderation_blocked_words", "shit")
+    if moderation_fails:
+        monkeypatch.setattr(
+            "app.managers.moderation.get_settings", Mock(side_effect=OSError)
+        )
+        expected = "pending"
     conn = AsyncMock(spec=asyncpg.Connection)
     conn.fetchval.return_value = 1
     payload = RequestPreparation(

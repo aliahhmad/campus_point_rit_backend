@@ -44,13 +44,16 @@ async def test_request_feed(workflow: Workflow) -> None:
             json={
                 "title": "Library 100% quiet" if kind == "visible" else kind,
                 "description": "This is SHIT!"
-                if kind == "pending"
+                if kind == "hidden"
                 else "Is it busy?",
                 "location_id": 2,
             },
             headers={"Idempotency-Key": "feed-" + kind},
         )
         assert created.status_code == status.HTTP_201_CREATED, created.text
+        assert created.json()["request"]["moderation_status"] == (
+            "hidden" if kind == "hidden" else "visible"
+        )
         others.append(created.json())
     async with connection(workflow.campus_url) as conn:
         await conn.execute(
@@ -59,8 +62,8 @@ async def test_request_feed(workflow: Workflow) -> None:
             others[0]["request"]["id"],
         )
         await conn.execute(
-            "UPDATE requests SET moderation_status='hidden' WHERE id=$1",
-            others[2]["request"]["id"],
+            "UPDATE requests SET moderation_status='pending' WHERE id=$1",
+            others[1]["request"]["id"],
         )
         await conn.execute(
             "UPDATE requests SET moderation_status='visible' WHERE id=$1",
