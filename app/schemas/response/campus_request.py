@@ -4,11 +4,13 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class CampusRequestResponse(BaseModel):
     """Return a request only once both participants acknowledge commit."""
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
     requester_id: int
@@ -31,3 +33,19 @@ class CampusRequestCreateResponse(BaseModel):
     created_at: datetime
     request: CampusRequestResponse | None = None
     error_code: str | None = None
+
+
+class CampusRequestListItem(CampusRequestResponse):
+    """Include the location label used in the request feed."""
+
+    location_name: str
+    building_code: str
+
+
+class CampusRequestListResponse(BaseModel):
+    """Return one page of requests the authenticated user may view."""
+
+    items: list[CampusRequestListItem]
+    page: int
+    size: int
+    has_more: bool

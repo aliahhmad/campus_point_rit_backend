@@ -4,20 +4,62 @@ from typing import Annotated
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.db import get_database_manual
-from app.managers.campus_request import create_request_transaction
+from app.managers.campus_request import (
+    create_request_transaction,
+    list_requests,
+)
 from app.managers.coordinator import advance_operation
 from app.managers.security import get_current_user
 from app.models.distributed_transaction import DistributedTransaction
+from app.models.enums import RequestStatus
 from app.models.user import User
 from app.schemas.request.campus_request import CampusRequestCreate
-from app.schemas.response.campus_request import CampusRequestCreateResponse
+from app.schemas.response.campus_request import (
+    CampusRequestCreateResponse,
+    CampusRequestListResponse,
+)
 
 router = APIRouter(tags=["Requests"])
+
+
+@router.get("/requests")
+async def get_requests(  # noqa: PLR0913
+    *,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_database_manual)],
+    page: Annotated[int, Query(ge=1, le=100_000)] = 1,
+    size: Annotated[int, Query(ge=1, le=100)] = 20,
+    search: Annotated[str, Query(max_length=200)] = "",
+    location_id: Annotated[int | None, Query(gt=0, le=2_147_483_647)] = None,
+    request_status: Annotated[
+        RequestStatus | None, Query(alias="status")
+    ] = None,
+    mine: bool = False,
+) -> CampusRequestListResponse:
+    """Browse visible requests and the current user's own submissions."""
+    return await list_requests(
+        session,
+        current_user.id,
+        page=page,
+        size=size,
+        search=search,
+        location_id=location_id,
+        request_status=request_status,
+        mine=mine,
+    )
 
 
 @router.post("/requests", status_code=status.HTTP_202_ACCEPTED)
