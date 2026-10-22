@@ -2,6 +2,7 @@
 
 from uuid import NAMESPACE_URL, uuid5
 
+from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,14 @@ from app.points.models import PointsTransaction, Wallet
 from app.points.models.enums import PointsTransactionType
 
 OPENING_GRANT = 100
+
+
+async def get_wallet(user_id: int, session: AsyncSession) -> Wallet:
+    """Read an existing wallet without creating or funding it."""
+    wallet = await session.get(Wallet, user_id)
+    if wallet is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Wallet not found")
+    return wallet
 
 
 async def initialize_wallet(

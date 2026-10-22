@@ -11,11 +11,13 @@ from app.resources import (
     home,
     transactions,
     user,
+    wallet,
 )
 
 api_router = APIRouter(prefix=get_settings().api_root)
 
 api_router.include_router(user.router)
+api_router.include_router(wallet.router)
 api_router.include_router(auth.router)
 api_router.include_router(api_key.router)
 api_router.include_router(campus_request.router)

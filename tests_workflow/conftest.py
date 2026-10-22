@@ -1,7 +1,7 @@
 """Run workflow tests only against explicitly supplied test databases."""
 
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 
 import pytest
@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -28,6 +29,7 @@ from app.models import (  # noqa: F401
 from app.models.user import User
 from app.points.config import get_settings as points_settings
 from app.points.database import Base as PointsBase
+from app.points.database import get_database as get_points_database
 from app.points.resources.routes import api_router as points_router
 from app.resources.routes import api_router
 from app.transactions.postgres import connection, quoted_gid
@@ -56,6 +58,19 @@ async def clear_database(url: str, tables: list[str]) -> None:
             await conn.execute("ROLLBACK PREPARED " + quoted_gid(row["gid"]))
         names = ",".join('"' + name + '"' for name in tables)
         await conn.execute("TRUNCATE " + names + " RESTART IDENTITY CASCADE")
+
+
+def points_database_override(
+    engine: AsyncEngine,
+) -> Callable[[], AsyncGenerator[AsyncSession, None]]:
+    """Keep Points HTTP reads and local transactions on its test database."""
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def database() -> AsyncGenerator[AsyncSession, None]:
+        async with factory() as session, session.begin():
+            yield session
+
+    return database
 
 
 @pytest_asyncio.fixture
@@ -132,6 +147,9 @@ async def workflow(
 
     campus.dependency_overrides[get_database_manual] = database
     campus.dependency_overrides[get_current_user] = user
+    points.dependency_overrides[get_points_database] = points_database_override(
+        engines[1]
+    )
 
     def service_client(*args, **kwargs) -> AsyncClient:  # noqa: ANN002, ANN003
         base = str(kwargs.get("base_url", ""))
