@@ -5,6 +5,7 @@ from uuid import UUID
 import asyncpg
 
 from app.database.db import get_database_url
+from app.managers.moderation import auto_moderate_request
 from app.transactions.postgres import (
     connection,
     finish,
@@ -27,14 +28,15 @@ async def insert_request(
     await conn.execute(
         (
             "INSERT INTO requests "
-            "(id,requester_id,location_id,title,description) VALUES"
-            " ($1,$2,$3,$4,$5)"
+            "(id,requester_id,location_id,title,description,moderation_status) "
+            "VALUES ($1,$2,$3,$4,$5,$6)"
         ),
         payload.request_id,
         payload.owner_id,
         payload.location_id,
         payload.title,
         payload.description,
+        auto_moderate_request(payload.title, payload.description).value,
     )
 
 

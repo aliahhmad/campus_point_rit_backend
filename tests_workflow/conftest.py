@@ -46,6 +46,12 @@ class Workflow:
     points: FastAPI
 
 
+@pytest.fixture(autouse=True)
+def moderation_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep workflow moderation independent of local configuration."""
+    monkeypatch.setattr(get_settings(), "moderation_blocked_words", "shit")
+
+
 async def clear_database(url: str, tables: list[str]) -> None:
     """Resolve test preparations before clearing the disposable database."""
     async with connection(url) as conn:

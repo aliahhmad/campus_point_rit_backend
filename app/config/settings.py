@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     api_root: str = ""
     no_root_route: bool = False
 
+    # Comma-separated words that leave new requests pending for review.
+    moderation_blocked_words: str = (
+        "fuck,fucking,fucker,motherfucker,shit,bullshit,"
+        "bitch,asshole,bastard,cunt,dickhead"
+    )
+
     cors_origins: str = "*"
 
     # Setup the Postgresql database.

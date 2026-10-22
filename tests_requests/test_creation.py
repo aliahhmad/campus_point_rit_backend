@@ -144,6 +144,7 @@ async def test_invalid_location_rolls_back_key(
         {"requester_id": 2},
         {"reward_points": 0},
         {"status": "open"},
+        {"moderation_status": "visible"},
     ],
 )
 async def test_invalid_body(

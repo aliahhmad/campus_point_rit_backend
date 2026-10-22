@@ -43,7 +43,9 @@ async def test_request_feed(workflow: Workflow) -> None:
             ROOT + "/requests",
             json={
                 "title": "Library 100% quiet" if kind == "visible" else kind,
-                "description": "Is it busy?",
+                "description": "This is SHIT!"
+                if kind == "pending"
+                else "Is it busy?",
                 "location_id": 2,
             },
             headers={"Idempotency-Key": "feed-" + kind},
@@ -78,7 +80,7 @@ async def test_request_feed(workflow: Workflow) -> None:
         own_id,
     ]
     assert items[0]["location_name"] == "Gym"
-    assert items[1]["moderation_status"] == "pending"
+    assert items[1]["moderation_status"] == "visible"
     for query in ("search=100%25", "location_id=2", "status=under_review"):
         filtered = await workflow.client.get(ROOT + "/requests?" + query)
         assert [item["id"] for item in filtered.json()["items"]] == [

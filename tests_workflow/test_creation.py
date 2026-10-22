@@ -64,6 +64,7 @@ async def test_creation_and_retry(workflow: Workflow) -> None:
     assert first.status_code == status.HTTP_201_CREATED, first.text
     assert first.json()["status"] == "completed"
     assert first.json()["request"]["title"] == BODY["title"]
+    assert first.json()["request"]["moderation_status"] == "visible"
     second = await workflow.client.post(URL, json=BODY, headers=HEADER)
     assert second.status_code == status.HTTP_201_CREATED
     assert second.json() == first.json()
