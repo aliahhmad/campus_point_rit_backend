@@ -2,8 +2,9 @@
 
 from fastapi import APIRouter
 
-from app.points.resources import health, wallet
+from app.points.resources import health, transactions, wallet
 
 api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(wallet.router)
+api_router.include_router(transactions.router)

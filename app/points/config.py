@@ -26,6 +26,7 @@ class PointsSettings(BaseSettings):
     db_port: int = 5434
     db_name: str = "campuspoint_points"
     service_token: SecretStr = SecretStr("")
+    campus_api_url: str = "http://localhost:8001"
 
 
 @lru_cache

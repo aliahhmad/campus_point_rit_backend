@@ -198,6 +198,8 @@ classmethod-decorators = ["pydantic.validator", "pydantic.root_validator"]
 convention = "google"
 
 [tool.ruff.lint.extend-per-file-ignores]
+"tests_requests/**/*.py" = ["S101"]
+"tests_workflow/**/*.py" = ["S101"]
 "tests_points/**/*.py" = ["S101"]
 "tests/**/*.py" = [
   "S101",    # we can (and MUST!) use 'assert' in test files.

@@ -1,0 +1,71 @@
+"""Validate and store request submissions."""
+
+from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.distributed_transaction import DistributedTransaction
+from app.models.location import Location
+from app.schemas.request.campus_request import CampusRequestCreate
+
+
+async def create_request_transaction(
+    submission: CampusRequestCreate,
+    idempotency_key: str,
+    owner_id: int,
+    session: AsyncSession,
+) -> DistributedTransaction:
+    """Store one operation per key; the caller commits the transaction."""
+    details = submission.model_dump()
+    # The unique key makes simultaneous retries safe.
+    operation = await session.scalar(
+        insert(DistributedTransaction)
+        .values(
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+            operation="create_request",
+            payload=details,
+        )
+        .on_conflict_do_nothing(
+            index_elements=[DistributedTransaction.idempotency_key]
+        )
+        .returning(DistributedTransaction)
+    )
+    if operation is None:
+        operation = await session.scalar(
+            select(DistributedTransaction).where(
+                DistributedTransaction.idempotency_key == idempotency_key
+            )
+        )
+        if (
+            operation is None
+            or operation.owner_id != owner_id
+            or operation.operation != "create_request"
+            or operation.payload != details
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "idempotency_conflict",
+                    "message": "This key belongs to another submission.",
+                },
+            )
+        return operation
+
+    # Check locations only for new submissions; retries keep their old result.
+    location = await session.scalar(
+        select(Location.id).where(
+            Location.id == submission.location_id,
+            Location.is_active.is_(True),
+        )
+    )
+    if location is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "invalid_location",
+                "message": "Select an existing, active campus location.",
+            },
+        )
+    return operation

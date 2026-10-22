@@ -18,3 +18,11 @@ class PointsTransactionType(Enum):
     hold = "hold"
     reward = "reward"
     refund = "refund"
+
+
+class ParticipantState(Enum):
+    """Track the Points participant's local transaction outcome."""
+
+    prepared = "prepared"
+    committed = "committed"
+    aborted = "aborted"

@@ -3,13 +3,23 @@
 from fastapi import APIRouter
 
 from app.config.settings import get_settings
-from app.resources import api_key, auth, heartbeat, home, user
+from app.resources import (
+    api_key,
+    auth,
+    campus_request,
+    heartbeat,
+    home,
+    transactions,
+    user,
+)
 
 api_router = APIRouter(prefix=get_settings().api_root)
 
 api_router.include_router(user.router)
 api_router.include_router(auth.router)
 api_router.include_router(api_key.router)
+api_router.include_router(campus_request.router)
+api_router.include_router(transactions.router)
 api_router.include_router(heartbeat.router)
 
 if not get_settings().no_root_route:
