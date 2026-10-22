@@ -8,9 +8,10 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app.config.settings import get_settings
 from app.database.db import get_database_url
+from app.managers.acceptance_participant import prepare_acceptance
 from app.managers.request_participant import finish_request, prepare_request
 from app.transactions.postgres import connection, protocol_error
-from app.transactions.schemas import RequestPreparation
+from app.transactions.schemas import AcceptancePreparation, RequestPreparation
 
 
 def require_service_token(
@@ -36,7 +37,8 @@ async def get_decision(transaction_id: UUID) -> dict[str, str | None]:
     """Let a prepared participant obtain the durable decision."""
     async with connection(get_database_url()) as conn:
         row = await conn.fetchrow(
-            "SELECT decision,state FROM distributed_transactions WHERE id=$1",
+            "SELECT decision,state,operation FROM distributed_transactions "
+            "WHERE id=$1",
             transaction_id,
         )
     if row is None:
@@ -50,6 +52,15 @@ async def prepare_campus(
 ) -> dict[str, str]:
     """Vote Yes after durable Campus preparation."""
     await prepare_request(transaction_id, payload)
+    return {"result": "yes"}
+
+
+@router.post("/{transaction_id}/prepare-acceptance")
+async def prepare_campus_acceptance(
+    transaction_id: UUID, payload: AcceptancePreparation
+) -> dict[str, str]:
+    """Prepare one validated response selection in the Campus database."""
+    await prepare_acceptance(transaction_id, payload)
     return {"result": "yes"}
 
 

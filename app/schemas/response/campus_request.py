@@ -22,6 +22,8 @@ class CampusRequestResponse(BaseModel):
     moderation_status: str
     created_at: datetime
     expires_at: datetime
+    accepted_response_id: int | None = None
+    accepted_at: datetime | None = None
 
 
 class CampusRequestCreateResponse(BaseModel):

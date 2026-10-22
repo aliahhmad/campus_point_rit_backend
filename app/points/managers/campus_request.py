@@ -69,8 +69,8 @@ async def prepare_request(
     )
 
 
-async def coordinator_decision(transaction_id: UUID) -> str | None:
-    """Ask Campus for its durable decision over authenticated HTTP."""
+async def coordinator_record(transaction_id: UUID) -> dict[str, str | None]:
+    """Read the durable decision and operation over authenticated HTTP."""
     settings = get_settings()
     async with httpx.AsyncClient(
         base_url=settings.campus_api_url.rstrip("/"), timeout=7
@@ -83,11 +83,13 @@ async def coordinator_decision(transaction_id: UUID) -> str | None:
         )
         try:
             response.raise_for_status()
-            decision = response.json()["decision"]
-            if decision is None:
-                return None
-            if isinstance(decision, str) and decision in {"commit", "abort"}:
-                return decision
+            body = response.json()
+            decision = body["decision"]
+            operation = body.get("operation", "create_request")
+            if (
+                decision is None or decision in {"commit", "abort"}
+            ) and operation in {"create_request", "accept_response"}:
+                return {"decision": decision, "operation": operation}
             raise protocol_error(code="service_unavailable", status_code=503)
         except (httpx.HTTPError, ValueError, KeyError) as exc:
             raise protocol_error(
@@ -95,8 +97,20 @@ async def coordinator_decision(transaction_id: UUID) -> str | None:
             ) from exc
 
 
+async def coordinator_decision(transaction_id: UUID) -> str | None:
+    """Let recovery wait while the coordinator has no recorded decision."""
+    return (await coordinator_record(transaction_id))["decision"]
+
+
 async def finish_request(transaction_id: UUID, decision: str) -> None:
     """Wait for the coordinator rather than deciding after a timeout."""
-    if await coordinator_decision(transaction_id) != decision:
+    record = await coordinator_record(transaction_id)
+    if record["decision"] != decision:
         raise protocol_error(code="decision_conflict")
-    await finish(get_database_url(), "points", transaction_id, decision)
+    await finish(
+        get_database_url(),
+        "points",
+        transaction_id,
+        decision,
+        operation=record["operation"] or "create_request",
+    )

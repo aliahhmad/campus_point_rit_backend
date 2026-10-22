@@ -1,4 +1,4 @@
-"""Coordinate request and response creation and replay durable decisions."""
+"""Coordinate Campus operations and replay durable decisions after failures."""
 
 import asyncio
 import json
@@ -11,8 +11,10 @@ from fastapi import HTTPException, status
 
 from app.config.settings import get_settings
 from app.database.db import get_database_url
+from app.managers.acceptance_participant import prepare_acceptance
 from app.managers.request_participant import finish_request, prepare_request
 from app.managers.response_participant import prepare_response
+from app.schemas.response.acceptance import ResponseAcceptanceResult
 from app.schemas.response.campus_request import (
     CampusRequestCreateResponse,
     CampusRequestResponse,
@@ -23,7 +25,11 @@ from app.schemas.response.campus_response import (
 )
 from app.schemas.response.operation import OperationResult
 from app.transactions.postgres import connection, lock_key, protocol_error
-from app.transactions.schemas import RequestPreparation, ResponsePreparation
+from app.transactions.schemas import (
+    AcceptancePreparation,
+    RequestPreparation,
+    ResponsePreparation,
+)
 
 logger = logging.getLogger(__name__)
 FAILURES = (
@@ -36,16 +42,18 @@ FAILURES = (
 
 
 def operation_participants(operation: str) -> tuple[str, ...]:
-    """Responses use Campus only; requests also reserve points."""
+    """Use both services for requests and rewards; Campus alone for answers."""
     if operation == "create_response":
         return ("campus",)
-    if operation == "create_request":
+    if operation in {"create_request", "accept_response"}:
         return ("campus", "points")
     raise protocol_error(code="unsupported_operation", status_code=503)
 
 
 async def call_points(
-    transaction_id: UUID, action: str, payload: RequestPreparation | None = None
+    transaction_id: UUID,
+    action: str,
+    payload: RequestPreparation | AcceptancePreparation | None = None,
 ) -> None:
     """Use authenticated HTTP to contact the independent Points Service."""
     settings = get_settings()
@@ -55,8 +63,14 @@ async def call_points(
     async with httpx.AsyncClient(
         base_url=settings.points_api_url.rstrip("/"), timeout=7
     ) as client:
+        endpoint_action = (
+            "prepare-acceptance"
+            if action == "prepare"
+            and isinstance(payload, AcceptancePreparation)
+            else action
+        )
         response = await client.post(
-            f"/internal/transactions/{transaction_id}/{action}",
+            f"/internal/transactions/{transaction_id}/{endpoint_action}",
             headers={"X-Service-Token": token},
             json=payload.model_dump() if payload else None,
         )
@@ -77,6 +91,10 @@ async def call_points(
                 "insufficient_points",
                 "invalid_location",
                 "idempotency_conflict",
+                "escrow_not_found",
+                "escrow_mismatch",
+                "escrow_already_settled",
+                "recipient_wallet_missing",
             }:
                 code = "service_unavailable"
             raise protocol_error(code, response.status_code)
@@ -110,6 +128,39 @@ async def record_decision(
     )
 
 
+async def acceptance_operation_response(
+    conn: asyncpg.Connection, transaction_id: UUID, operation: asyncpg.Record
+) -> ResponseAcceptanceResult:
+    """Report payout only after both participants acknowledge the decision."""
+    result = ResponseAcceptanceResult(
+        operation_id=transaction_id,
+        created_at=operation["created_at"],
+        error_code=operation["error_code"],
+    )
+    if operation["state"] != "finished":
+        return result
+    if operation["decision"] == "abort":
+        result.status = "aborted"
+        return result
+    request = await conn.fetchrow(
+        "SELECT * FROM requests WHERE id=$1", operation["request_id"]
+    )
+    selected = await conn.fetchrow(
+        "SELECT * FROM responses WHERE id=$1", operation["response_id"]
+    )
+    if (
+        request is None
+        or selected is None
+        or request["accepted_response_id"] != operation["response_id"]
+    ):
+        raise protocol_error(code="service_unavailable", status_code=503)
+    result.status = "completed"
+    result.request = CampusRequestResponse(**dict(request))
+    result.accepted_response = CampusResponseRead(**dict(selected))
+    result.recipient_id = selected["contributor_id"]
+    return result
+
+
 async def operation_response(
     conn: asyncpg.Connection, transaction_id: UUID
 ) -> OperationResult:
@@ -119,6 +170,10 @@ async def operation_response(
     )
     if operation is None:
         raise HTTPException(404, "Operation not found")
+    if operation["operation"] == "accept_response":
+        return await acceptance_operation_response(
+            conn, transaction_id, operation
+        )
     result_type = (
         CampusResponseCreateResult
         if operation["operation"] == "create_response"
@@ -157,13 +212,15 @@ async def operation_response(
 
 async def preparation_payload(
     conn: asyncpg.Connection, transaction_id: UUID, operation: asyncpg.Record
-) -> RequestPreparation | ResponsePreparation:
+) -> RequestPreparation | ResponsePreparation | AcceptancePreparation:
     """Reserve the entity ID once and reconstruct the original submission."""
     details = (
         json.loads(operation["payload"])
         if isinstance(operation["payload"], str)
         else operation["payload"]
     )
+    if operation["operation"] == "accept_response":
+        return AcceptancePreparation(**details, owner_id=operation["owner_id"])
     if operation["operation"] == "create_response":
         response_id = operation["response_id"]
         if response_id is None:
@@ -200,12 +257,16 @@ async def prepare_and_decide(
     for participant in operation_participants(operation["operation"]):
         try:
             if participant == "campus":
-                if isinstance(payload, ResponsePreparation):
+                if isinstance(payload, AcceptancePreparation):
+                    await prepare_acceptance(transaction_id, payload)
+                elif isinstance(payload, ResponsePreparation):
                     await prepare_response(transaction_id, payload)
                 else:
                     await prepare_request(transaction_id, payload)
             else:
-                if not isinstance(payload, RequestPreparation):
+                if not isinstance(
+                    payload, (RequestPreparation, AcceptancePreparation)
+                ):
                     raise protocol_error(
                         code="unsupported_operation", status_code=503
                     )

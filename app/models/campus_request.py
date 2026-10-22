@@ -32,6 +32,12 @@ class CampusRequest(Base):
             "length(btrim(description)) > 0",
             name="description_not_blank",
         ),
+        CheckConstraint(
+            "(accepted_response_id IS NULL AND accepted_at IS NULL) OR "
+            "(accepted_response_id IS NOT NULL AND accepted_at IS NOT NULL "
+            "AND status = 'completed')",
+            name="accepted_response_completed",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -54,6 +60,19 @@ class CampusRequest(Base):
     moderation_status: Mapped[ModerationStatus] = mapped_column(
         Enum(ModerationStatus, name="moderation_status"),
         server_default=ModerationStatus.pending.value,
+    )
+    accepted_response_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "responses.id",
+            ondelete="RESTRICT",
+            use_alter=True,
+            name="fk_requests_accepted_response_id_responses",
+        ),
+        nullable=True,
+    )
+    accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

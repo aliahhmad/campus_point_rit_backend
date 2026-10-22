@@ -146,4 +146,5 @@ PostgreSQL moderation enum and adds `distributed_transactions.response_id`.
 No Points schema changes are needed.
 
 The new routes and schemas are also available in Campus Swagger at `/docs`.
+Request owners can [accept one visible response and release its held reward](acceptance.md).
 There is no editing, deletion, or manual moderation endpoint in this change.
