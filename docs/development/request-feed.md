@@ -3,11 +3,21 @@
 The authenticated frontend provides **Campus requests** at `/requests` and a
 **New request** form at `/requests/new`.
 
+Each request card links to `/requests/{request_id}`. The detail page displays
+the description, location, requester, reward, dates, and moderation state,
+alongside paginated responses. Eligible contributors can submit an answer;
+request owners cannot answer their own requests. Request information and
+responses refresh every five seconds. The answer form preserves unresolved
+submissions in session storage and polls the shared operations endpoint.
+
 - `GET /locations` lists active predefined locations for the dropdown.
 - `GET /requests` lists confirmed requests, newest first, with location labels.
   It accepts `search` (literal title substring), `location_id`, `status`, `mine`,
   `page` (default 1), and `size` (default 20, maximum 100). The response contains
   `items`, `page`, `size`, and `has_more`.
+- `GET /requests/{request_id}` returns one request with the same fields and
+  visibility checks as the feed. Missing, inaccessible, and unconfirmed requests
+  return 404, including when opening a direct link.
 - A request appears only after the coordinator records a finished COMMIT.
   Visible requests can be browsed by other users. Pending and hidden requests
   remain accessible to their owner.

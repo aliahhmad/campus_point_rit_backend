@@ -23,6 +23,7 @@ from app.managers.security import get_current_user
 from app.models import (  # noqa: F401
     api_key,
     campus_request,
+    campus_response,
     participant_transaction,
     transaction_participant,
 )
@@ -122,6 +123,7 @@ async def workflow(
     for module in (
         "app.managers.coordinator",
         "app.managers.request_participant",
+        "app.managers.response_participant",
         "app.resources.transactions",
     ):
         monkeypatch.setattr(module + ".get_database_url", lambda: campus_url)

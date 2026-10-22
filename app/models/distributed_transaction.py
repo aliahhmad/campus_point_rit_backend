@@ -26,6 +26,8 @@ class DistributedTransaction(Base):
     payload: Mapped[dict[str, str | int]] = mapped_column(JSON)
     # Reserve the request ID before preparation; its row is not visible yet.
     request_id: Mapped[int | None] = mapped_column(nullable=True)
+    # Response creation reserves its own ID and has no Points participant.
+    response_id: Mapped[int | None] = mapped_column(nullable=True)
     state: Mapped[TransactionState] = mapped_column(
         Enum(TransactionState, name="transaction_state"),
         server_default=TransactionState.preparing.value,

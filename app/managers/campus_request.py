@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import Select
 
 from app.models.campus_request import CampusRequest
 from app.models.distributed_transaction import DistributedTransaction
@@ -22,19 +23,9 @@ from app.schemas.response.campus_request import (
 )
 
 
-async def list_requests(  # noqa: PLR0913
-    session: AsyncSession,
-    owner_id: int,
-    *,
-    page: int,
-    size: int,
-    search: str,
-    location_id: int | None,
-    request_status: RequestStatus | None,
-    mine: bool,
-) -> CampusRequestListResponse:
-    """List confirmed creations; unpublished content is owner-only."""
-    query = (
+def visible_requests(owner_id: int) -> Select[tuple[CampusRequest, str, str]]:
+    """Share creation and visibility rules between lists and direct links."""
+    return (
         select(CampusRequest, Location.name, Location.building_code)
         .join(Location, CampusRequest.location_id == Location.id)
         .join(
@@ -51,6 +42,40 @@ async def list_requests(  # noqa: PLR0913
             ),
         )
     )
+
+
+async def get_request(
+    session: AsyncSession, request_id: int, owner_id: int
+) -> CampusRequestListItem:
+    """Return one accessible request with its location information."""
+    row = (
+        await session.execute(
+            visible_requests(owner_id).where(CampusRequest.id == request_id)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Request not found")
+    request, name, code = row
+    return CampusRequestListItem(
+        **CampusRequestResponse.model_validate(request).model_dump(),
+        location_name=name,
+        building_code=code,
+    )
+
+
+async def list_requests(  # noqa: PLR0913
+    session: AsyncSession,
+    owner_id: int,
+    *,
+    page: int,
+    size: int,
+    search: str,
+    location_id: int | None,
+    request_status: RequestStatus | None,
+    mine: bool,
+) -> CampusRequestListResponse:
+    """List confirmed creations; unpublished content is owner-only."""
+    query = visible_requests(owner_id)
     if mine:
         query = query.where(CampusRequest.requester_id == owner_id)
     if location_id is not None:

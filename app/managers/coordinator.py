@@ -1,4 +1,4 @@
-"""Coordinate request creation and replay durable decisions after failures."""
+"""Coordinate request and response creation and replay durable decisions."""
 
 import asyncio
 import json
@@ -12,12 +12,18 @@ from fastapi import HTTPException, status
 from app.config.settings import get_settings
 from app.database.db import get_database_url
 from app.managers.request_participant import finish_request, prepare_request
+from app.managers.response_participant import prepare_response
 from app.schemas.response.campus_request import (
     CampusRequestCreateResponse,
     CampusRequestResponse,
 )
+from app.schemas.response.campus_response import (
+    CampusResponseCreateResult,
+    CampusResponseRead,
+)
+from app.schemas.response.operation import OperationResult
 from app.transactions.postgres import connection, lock_key, protocol_error
-from app.transactions.schemas import RequestPreparation
+from app.transactions.schemas import RequestPreparation, ResponsePreparation
 
 logger = logging.getLogger(__name__)
 FAILURES = (
@@ -27,6 +33,15 @@ FAILURES = (
     TimeoutError,
     HTTPException,
 )
+
+
+def operation_participants(operation: str) -> tuple[str, ...]:
+    """Responses use Campus only; requests also reserve points."""
+    if operation == "create_response":
+        return ("campus",)
+    if operation == "create_request":
+        return ("campus", "points")
+    raise protocol_error(code="unsupported_operation", status_code=503)
 
 
 async def call_points(
@@ -97,38 +112,70 @@ async def record_decision(
 
 async def operation_response(
     conn: asyncpg.Connection, transaction_id: UUID
-) -> CampusRequestCreateResponse:
-    """Expose completion only after both acknowledgements are durable."""
+) -> OperationResult:
+    """Expose completion only after all acknowledgements are durable."""
     operation = await conn.fetchrow(
         "SELECT * FROM distributed_transactions WHERE id=$1", transaction_id
     )
     if operation is None:
         raise HTTPException(404, "Operation not found")
-    result = CampusRequestCreateResponse(
+    result_type = (
+        CampusResponseCreateResult
+        if operation["operation"] == "create_response"
+        else CampusRequestCreateResponse
+    )
+    result = result_type(
         operation_id=transaction_id,
         created_at=operation["created_at"],
         error_code=operation["error_code"],
     )
     if operation["state"] == "finished":
         if operation["decision"] == "commit":
-            row = await conn.fetchrow(
-                "SELECT * FROM requests WHERE id=$1", operation["request_id"]
-            )
+            if isinstance(result, CampusResponseCreateResult):
+                row = await conn.fetchrow(
+                    "SELECT * FROM responses WHERE id=$1",
+                    operation["response_id"],
+                )
+            else:
+                row = await conn.fetchrow(
+                    "SELECT * FROM requests WHERE id=$1",
+                    operation["request_id"],
+                )
             if row is None:
                 raise protocol_error(
                     code="service_unavailable", status_code=503
                 )
             result.status = "completed"
-            result.request = CampusRequestResponse(**dict(row))
+            if isinstance(result, CampusResponseCreateResult):
+                result.response = CampusResponseRead(**dict(row))
+            else:
+                result.request = CampusRequestResponse(**dict(row))
         else:
             result.status = "aborted"
     return result
 
 
-async def prepare_and_decide(
+async def preparation_payload(
     conn: asyncpg.Connection, transaction_id: UUID, operation: asyncpg.Record
-) -> None:
-    """Collect durable Yes votes and save one decision before delivery."""
+) -> RequestPreparation | ResponsePreparation:
+    """Reserve the entity ID once and reconstruct the original submission."""
+    details = (
+        json.loads(operation["payload"])
+        if isinstance(operation["payload"], str)
+        else operation["payload"]
+    )
+    if operation["operation"] == "create_response":
+        response_id = operation["response_id"]
+        if response_id is None:
+            response_id = await conn.fetchval(
+                "UPDATE distributed_transactions SET "
+                "response_id=nextval(pg_get_serial_sequence('responses','id')),"
+                "updated_at=now() WHERE id=$1 RETURNING response_id",
+                transaction_id,
+            )
+        return ResponsePreparation(
+            **details, owner_id=operation["owner_id"], response_id=response_id
+        )
     request_id = operation["request_id"]
     if request_id is None:
         request_id = await conn.fetchval(
@@ -139,20 +186,29 @@ async def prepare_and_decide(
             ),
             transaction_id,
         )
-    details = (
-        json.loads(operation["payload"])
-        if isinstance(operation["payload"], str)
-        else operation["payload"]
-    )
-    payload = RequestPreparation(
+    return RequestPreparation(
         **details, owner_id=operation["owner_id"], request_id=request_id
     )
+
+
+async def prepare_and_decide(
+    conn: asyncpg.Connection, transaction_id: UUID, operation: asyncpg.Record
+) -> None:
+    """Collect durable Yes votes and save one decision before delivery."""
+    payload = await preparation_payload(conn, transaction_id, operation)
     decision, error_code = "commit", None
-    for participant in ("campus", "points"):
+    for participant in operation_participants(operation["operation"]):
         try:
             if participant == "campus":
-                await prepare_request(transaction_id, payload)
+                if isinstance(payload, ResponsePreparation):
+                    await prepare_response(transaction_id, payload)
+                else:
+                    await prepare_request(transaction_id, payload)
             else:
+                if not isinstance(payload, RequestPreparation):
+                    raise protocol_error(
+                        code="unsupported_operation", status_code=503
+                    )
                 await call_points(transaction_id, "prepare", payload)
         except FAILURES as exc:
             decision = "abort"
@@ -185,22 +241,20 @@ async def prepare_and_decide(
 async def deliver_decision(
     conn: asyncpg.Connection, transaction_id: UUID
 ) -> None:
-    """Repeat the durable decision until both participants acknowledge."""
+    """Repeat the durable decision until all participants acknowledge."""
     # Recovery must finish COMMIT; it cannot substitute an ABORT.
     decision = await conn.fetchval(
         "SELECT decision FROM distributed_transactions WHERE id=$1",
         transaction_id,
     )
-    for participant in ("points", "campus"):
-        acknowledged = await conn.fetchval(
-            (
-                "SELECT acknowledged FROM transaction_participants "
-                "WHERE transaction_id=$1 AND participant=$2"
-            ),
-            transaction_id,
-            participant,
-        )
-        if acknowledged:
+    participants = await conn.fetch(
+        "SELECT participant,acknowledged FROM transaction_participants "
+        "WHERE transaction_id=$1 ORDER BY participant DESC",
+        transaction_id,
+    )
+    for record in participants:
+        participant = record["participant"]
+        if record["acknowledged"]:
             continue
         try:
             if participant == "points":
@@ -236,7 +290,7 @@ async def deliver_decision(
 
 async def advance_operation(
     transaction_id: UUID,
-) -> CampusRequestCreateResponse:
+) -> OperationResult:
     """Serialize one coordinator and resume from its durable state."""
     async with connection(get_database_url()) as conn:
         locked = await conn.fetchval(
@@ -252,7 +306,7 @@ async def advance_operation(
             raise HTTPException(404, "Operation not found")
         if operation["state"] == "finished":
             return await operation_response(conn, transaction_id)
-        for participant in ("campus", "points"):
+        for participant in operation_participants(operation["operation"]):
             await conn.execute(
                 (
                     "INSERT INTO transaction_participants "
@@ -279,7 +333,7 @@ async def recover_operations() -> None:
         try:
             await advance_operation(row["id"])
         except FAILURES:  # noqa: PERF203 - recover other operations after a failure
-            logger.warning("Request operation %s awaits recovery", row["id"])
+            logger.warning("Campus operation %s awaits recovery", row["id"])
 
 
 async def recovery_loop() -> None:
@@ -288,5 +342,5 @@ async def recovery_loop() -> None:
         try:
             await recover_operations()
         except FAILURES:
-            logger.warning("Request coordinator is waiting for its database")
+            logger.warning("Campus coordinator is waiting for its database")
         await asyncio.sleep(5)

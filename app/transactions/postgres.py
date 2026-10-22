@@ -9,13 +9,15 @@ import hashlib
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import TypeVar
 from uuid import UUID
 
 import asyncpg
 from fastapi import HTTPException
+from pydantic import BaseModel
 from sqlalchemy.engine import URL, make_url
 
-from app.transactions.schemas import RequestPreparation
+Preparation = TypeVar("Preparation", bound=BaseModel)
 
 
 def protocol_error(code: str, status_code: int = 409) -> HTTPException:
@@ -77,14 +79,14 @@ def quoted_gid(gid: str) -> str:
     return "'" + gid.replace("'", "''") + "'"
 
 
-async def prepare(
+async def prepare(  # noqa: PLR0913
     url: str | URL,
     service: str,
     transaction_id: UUID,
-    payload: RequestPreparation,
-    work: Callable[
-        [asyncpg.Connection, UUID, RequestPreparation], Awaitable[None]
-    ],
+    payload: Preparation,
+    work: Callable[[asyncpg.Connection, UUID, Preparation], Awaitable[None]],
+    *,
+    operation: str = "create_request",
 ) -> None:
     """Vote Yes only after PostgreSQL has durably prepared all local work."""
     fingerprint = hashlib.sha256(
@@ -120,10 +122,11 @@ async def prepare(
                 (
                     "INSERT INTO participant_transactions (transaction_id, "
                     "local_transaction_id, operation, state) VALUES "
-                    "($1,$2,'create_request','prepared')"
+                    "($1,$2,$3,'prepared')"
                 ),
                 transaction_id,
                 gid,
+                operation,
             )
             await conn.execute("PREPARE TRANSACTION " + quoted_gid(gid))
         except BaseException:
@@ -144,7 +147,12 @@ async def mark_committed(
 
 
 async def finish(
-    url: str | URL, service: str, transaction_id: UUID, decision: str
+    url: str | URL,
+    service: str,
+    transaction_id: UUID,
+    decision: str,
+    *,
+    operation: str = "create_request",
 ) -> None:
     """Apply an already verified coordinator decision; repeats are harmless."""
     prefix = gid_prefix(service, transaction_id)
@@ -183,11 +191,12 @@ async def finish(
                 (
                     "INSERT INTO participant_transactions (transaction_id, "
                     "local_transaction_id, operation, state) VALUES "
-                    "($1,$2,'create_request','aborted') ON CONFLICT "
+                    "($1,$2,$3,'aborted') ON CONFLICT "
                     "(transaction_id) DO NOTHING"
                 ),
                 transaction_id,
                 gid or prefix,
+                operation,
             )
 
 

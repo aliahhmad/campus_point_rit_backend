@@ -91,6 +91,7 @@ nav:
       - With Docker: development/docker.md
       - Load Campus Locations: development/locations.md
       - Initialize Wallets: development/wallets.md
+      - Response API: development/responses.md
       - Documentation: development/documentation.md
   - Project Organization: project-organization.md
   - Tutorials: tutorials.md

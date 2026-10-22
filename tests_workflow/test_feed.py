@@ -84,6 +84,18 @@ async def test_request_feed(workflow: Workflow) -> None:
     ]
     assert items[0]["location_name"] == "Gym"
     assert items[1]["moderation_status"] == "visible"
+    for item in items:
+        detail = await workflow.client.get(ROOT + f"/requests/{item['id']}")
+        assert detail.status_code == status.HTTP_200_OK
+        assert detail.json() == item
+    for entry in others[1:]:
+        inaccessible = await workflow.client.get(
+            ROOT + f"/requests/{entry['request']['id']}"
+        )
+        assert inaccessible.status_code == status.HTTP_404_NOT_FOUND
+    assert (
+        await workflow.client.get(ROOT + "/requests/2147483647")
+    ).status_code == status.HTTP_404_NOT_FOUND
     for query in ("search=100%25", "location_id=2", "status=under_review"):
         filtered = await workflow.client.get(ROOT + "/requests?" + query)
         assert [item["id"] for item in filtered.json()["items"]] == [
@@ -100,9 +112,18 @@ async def test_request_feed(workflow: Workflow) -> None:
     assert empty.json()["items"] == []
     workflow.campus.dependency_overrides[get_current_user] = other_user
     other_feed = await workflow.client.get(ROOT + "/requests")
-    assert {item["id"] for item in other_feed.json()["items"]} == {
+    assert {item["id"] for item in other_feed.json()["items"]} == {own_id} | {
         entry["request"]["id"] for entry in others[:3]
     }
+    for entry in others[1:3]:
+        own_detail = await workflow.client.get(
+            ROOT + f"/requests/{entry['request']['id']}"
+        )
+        assert own_detail.status_code == status.HTTP_200_OK
+    unconfirmed = await workflow.client.get(
+        ROOT + f"/requests/{others[3]['request']['id']}"
+    )
+    assert unconfirmed.status_code == status.HTTP_404_NOT_FOUND
 
 
 async def test_location_dropdown(workflow: Workflow) -> None:

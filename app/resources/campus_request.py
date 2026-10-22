@@ -1,6 +1,6 @@
 """Expose authenticated, idempotent campus request intake."""
 
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 import asyncpg
@@ -9,6 +9,7 @@ from fastapi import (
     Depends,
     Header,
     HTTPException,
+    Path,
     Query,
     Response,
     status,
@@ -19,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.db import get_database_manual
 from app.managers.campus_request import (
     create_request_transaction,
+    get_request,
     list_requests,
 )
 from app.managers.coordinator import advance_operation
@@ -29,8 +31,10 @@ from app.models.user import User
 from app.schemas.request.campus_request import CampusRequestCreate
 from app.schemas.response.campus_request import (
     CampusRequestCreateResponse,
+    CampusRequestListItem,
     CampusRequestListResponse,
 )
+from app.schemas.response.operation import OperationResult
 
 router = APIRouter(tags=["Requests"])
 
@@ -62,6 +66,16 @@ async def get_requests(  # noqa: PLR0913
     )
 
 
+@router.get("/requests/{request_id}")
+async def get_request_by_id(
+    request_id: Annotated[int, Path(gt=0, le=2_147_483_647)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_database_manual)],
+) -> CampusRequestListItem:
+    """Open a confirmed request using the same visibility rules as the feed."""
+    return await get_request(session, request_id, current_user.id)
+
+
 @router.post("/requests", status_code=status.HTTP_202_ACCEPTED)
 async def create_request(
     submission: CampusRequestCreate,
@@ -86,7 +100,9 @@ async def create_request(
             operation = await create_request_transaction(
                 submission, idempotency_key, current_user.id, session
             )
-        result = await advance_operation(operation.id)
+        result = cast(
+            "CampusRequestCreateResponse", await advance_operation(operation.id)
+        )
         if result.status == "completed":
             response.status_code = status.HTTP_201_CREATED
         elif result.status == "aborted":
@@ -127,7 +143,7 @@ async def get_operation(
     operation_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_database_manual)],
-) -> CampusRequestCreateResponse:
+) -> OperationResult:
     """Authorize the owner, then retry and report unfinished coordination."""
     try:
         operation = await session.get(DistributedTransaction, operation_id)

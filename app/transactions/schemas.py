@@ -3,6 +3,7 @@
 from pydantic import Field
 
 from app.schemas.request.campus_request import CampusRequestCreate
+from app.schemas.request.campus_response import CampusResponseCreate
 
 
 class RequestPreparation(CampusRequestCreate):
@@ -10,3 +11,11 @@ class RequestPreparation(CampusRequestCreate):
 
     owner_id: int = Field(gt=0, le=2_147_483_647, strict=True)
     request_id: int = Field(gt=0, le=2_147_483_647, strict=True)
+
+
+class ResponsePreparation(CampusResponseCreate):
+    """Carry the parent request and server-assigned contributor and response."""
+
+    owner_id: int = Field(gt=0, le=2_147_483_647, strict=True)
+    request_id: int = Field(gt=0, le=2_147_483_647, strict=True)
+    response_id: int = Field(gt=0, le=2_147_483_647, strict=True)

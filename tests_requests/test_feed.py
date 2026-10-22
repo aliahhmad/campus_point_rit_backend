@@ -9,7 +9,7 @@ from app.managers.security import get_current_user
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["/locations", "/requests"])
+@pytest.mark.parametrize("path", ["/locations", "/requests", "/requests/1"])
 async def test_browsing_requires_authentication(
     api: FastAPI, client: AsyncClient, path: str
 ) -> None:
@@ -33,4 +33,16 @@ async def test_browsing_requires_authentication(
 async def test_invalid_feed_filters(client: AsyncClient, query: str) -> None:
     """Reject invalid filters and excessive page sizes."""
     response = await client.get(get_settings().api_root + "/requests?" + query)
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("request_id", ["0", "2147483648", "invalid"])
+async def test_invalid_request_detail_id(
+    client: AsyncClient, request_id: str
+) -> None:
+    """Bound direct request IDs before querying the database."""
+    response = await client.get(
+        get_settings().api_root + f"/requests/{request_id}"
+    )
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT

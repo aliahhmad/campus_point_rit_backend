@@ -12,6 +12,7 @@ from app.database.db import Base, get_database_url
 from app.models import (
     api_key,
     campus_request,
+    campus_response,
     distributed_transaction,
     location,
     participant_transaction,

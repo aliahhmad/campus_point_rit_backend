@@ -7,6 +7,7 @@ from app.resources import (
     api_key,
     auth,
     campus_request,
+    campus_response,
     heartbeat,
     home,
     location,
@@ -22,6 +23,7 @@ api_router.include_router(wallet.router)
 api_router.include_router(auth.router)
 api_router.include_router(api_key.router)
 api_router.include_router(campus_request.router)
+api_router.include_router(campus_response.router)
 api_router.include_router(location.router)
 api_router.include_router(transactions.router)
 api_router.include_router(heartbeat.router)
