@@ -1,10 +1,9 @@
 """Test the authentication routes of the application."""
 
 import logging
-from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import HTTPException, status
+from fastapi import status
 from fastapi_cache import FastAPICache
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,11 +58,7 @@ class TestAuthRoutes:
     # ------------------------------------------------------------------------ #
     @pytest.mark.asyncio
     async def test_register_new_user(
-        self,
-        client: AsyncClient,
-        test_db: AsyncSession,
-        mocker,
-        points_wallet: AsyncMock,
+        self, client: AsyncClient, test_db: AsyncSession, mocker
     ) -> None:
         """Ensure a new user can register."""
         # disable email sending by mocking the function
@@ -103,36 +98,6 @@ class TestAuthRoutes:
         assert user_from_db.role == RoleType.user
 
         mock_send.assert_called_once()
-        points_wallet.assert_awaited_once_with(user_from_db.id)
-
-    @pytest.mark.asyncio
-    async def test_register_rolls_back_when_wallet_fails(
-        self,
-        client: AsyncClient,
-        test_db: AsyncSession,
-        mocker,
-        points_wallet: AsyncMock,
-    ) -> None:
-        """A failed wallet call must prevent successful account creation."""
-        mock_send = mocker.patch(self.email_fn_to_patch)
-        points_wallet.side_effect = HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Wallet service unavailable",
-        )
-        body = {
-            "email": "walletfailure@example.org",
-            "first_name": "Wallet",
-            "last_name": "Failure",
-            "password": "test12345!",
-        }
-        response = await client.post(self.register_path, json=body)
-
-        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
-        with pytest.raises(HTTPException) as missing_user:
-            await UserManager.get_user_by_email(body["email"], test_db)
-        assert missing_user.value.status_code == status.HTTP_404_NOT_FOUND
-        points_wallet.assert_awaited_once()
-        mock_send.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_register_with_cache_disabled(

@@ -26,8 +26,6 @@ from app.config.log_config import get_log_config
 from app.config.openapi import custom_openapi
 from app.config.settings import check_secrets_dir, get_settings, unwrap_secret
 from app.database.db import async_session
-from app.managers.coordinator import recovery_loop
-from app.managers.expiration import expiration_loop
 from app.metrics.instrumentator import register_metrics
 from app.middleware.cache_logging import CacheLoggingMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
@@ -35,7 +33,6 @@ from app.rate_limit import limiter
 from app.rate_limit.handlers import rate_limit_handler
 from app.resources import config_error
 from app.resources.routes import api_router
-from app.transactions import running_recovery
 
 # Use standard logging for startup messages and console
 logger = logging.getLogger("uvicorn")
@@ -72,7 +69,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, None]:
     Currently we:
     - Ensure the database is available and configured properly
     - Initialize the cache backend (Redis or in-memory)
-    - Start transaction recovery and periodic request expiry scans
     """
     # Initialize loguru logging within the server process.
     get_log_config()
@@ -147,11 +143,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, None]:
     else:
         logger.info("Caching is disabled (CACHE_ENABLED=false).")
 
-    async with (
-        running_recovery(recovery_loop),
-        running_recovery(expiration_loop),
-    ):
-        yield
+    yield
 
     # Ensure loguru queue is drained before shutdown to avoid warnings.
     loguru_logger.complete()

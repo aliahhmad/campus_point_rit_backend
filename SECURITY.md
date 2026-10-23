@@ -1,29 +1,35 @@
-# CampusPoint security reporting
+# Security Policy
 
-This repository is a development/demo project. No supported-release schedule,
-response-time guarantee, or production security certification is declared here.
-Review the current implementation and deployment before using real data.
+## Supported Versions
 
-## Report a vulnerability
+| Version | Supported          |
+| ------- | ------------------ |
+| >=0.8.0 | :white_check_mark: |
 
-Contact this project's maintainers through a private channel associated with
-the CampusPoint repository. If private vulnerability reporting is available on
-the repository, use it. A dedicated security email has not been configured in
-these docs; do not send project reports to the upstream template author.
+Until we reach a 1.0 milestone, we will generally only support the latest
+release of the project. If you are having issues with an older version, please
+upgrade to the latest version and see if the issue is resolved. If not, please
+open an Issue.
 
-Do not publish credentials, raw tokens, personal data, exploitable details, or
-application database dumps in public issues. Include affected code/behavior,
-reproduction steps using disposable data, impact, and any proposed mitigation.
+If the latest full release does not help, try the latest alpha or beta version
+(if available) or the `main` branch on the repository to see if that fixes your
+problem (often the `main` branch will have several merged PR's or fixes that
+have not yet been released). If not, please open an Issue.
 
-## Relevant boundaries
+## Reporting a Vulnerability
 
-Keep service tokens, JWT secrets, and database credentials outside frontend
-builds and Git. Internal APIs require the shared service token. Role checks,
-request visibility, and escrow state must be enforced on the server.
+If you find a security vulnerability in this code, [please open an
+Issue](https://github.com/seapagan/fastapi-template/issues) and report it. It
+may be already known to us and we may be working on a fix. If not, we will work
+with you to understand the issue and fix it. Generally we would annouce any
+known vulnerability in the
+[Discussions](https://github.com/seapagan/fastapi-template/discussions)
+forum.
 
-Prepared transactions require coordinated resolution. Do not manually undo a
-preparation solely because it is old; first establish its durable decision.
-Use disposable databases for failure injection and destructive workflow tests.
+We use **Renovate** for dependency management and **Dependabot** for automatic
+security updates. If a security vulnerability is found in a dependency,
+Dependabot will issue a PR to fix this as soon as an updated version of the
+dependency is available. We will merge these PRs as soon as they are available.
 
-`SECURITY-REVIEW.md` contains inherited historical review notes, not a current
-CampusPoint audit or assurance that every item applies to this checkout.
+Note that this code is provided as-is, and is not guaranteed to be
+suitable for any purpose.  Use at your own risk.

@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,16 +14,11 @@ class ApiKey(Base):
     """Define the API Keys model."""
 
     __tablename__ = "api_keys"
-    # Match the constraints already created by the template's API key migration.
-    __table_args__ = (UniqueConstraint("key", name="uq_api_keys_key"),)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", name="fk_api_keys_user_id", ondelete="CASCADE"),
-        index=True,
-    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(50))
     created_at: Mapped[datetime] = mapped_column(

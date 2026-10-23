@@ -1,50 +1,64 @@
-# Databases and migrations
+# Setup the application database
 
-Campus and Points own separate PostgreSQL databases and separate Alembic
-histories. There are no cross-service foreign keys. The development Compose
-stack starts PostgreSQL 18.1 with `max_prepared_transactions=100` on both services.
+## Migrate the Database
 
-| Connection | Campus | Points |
-| --- | --- | --- |
-| Host tools | `localhost:5433` | `localhost:5434` |
-| API containers | `campus-db:5432` | `points-db:5432` |
-| Credentials/settings | `DB_*` | `POINTS_DB_*` |
-| Migration config | `alembic.ini` | `alembic-points.ini` |
+Make sure you have [configured](environment.md) the database. Then
+run the following command to set it up, applying all the required migrations:
 
-Compose supplies container connection addresses. For host tools, set the
-corresponding loopback ports in `.env`.
-
-## Apply migrations
-
-For running APIs:
-
-```sh
-docker compose exec campus-api alembic upgrade head
-docker compose exec points-api alembic -c alembic-points.ini upgrade head
+```console
+$ api-admin db init
 ```
 
-API startup also runs these migrations automatically. Schema creation does not
-load locations; follow [the CSV import](../../development/locations.md).
+(this is the same as running `alembic upgrade head`, though it will downgrade to
+the base structure and delete all data as well)
 
-## Prepared transactions
+## Update the Database structure
 
-```sql
-SHOW max_prepared_transactions;
-SELECT gid, prepared, database
-FROM pg_prepared_xacts
-WHERE database = current_database();
+Everytime you add or edit a model, create a new migration as shown below. You
+will be asked for a commit message. This will create and apply the migration in
+the same step:
+
+```console
+$ api-admin db revision
+Enter the commit message for the revision: Added email to the users model
+
+  Generating ..._added_email_to_the_users_model.py ...  done
 ```
 
-A value of zero disables native preparation. Changing it requires restarting
-PostgreSQL. Do not manually roll back an old preparation without checking the
-coordinator decision; restore service connectivity and let recovery resolve it.
+This is the same as running the below commands, it is provided for ease of use:
 
-## Persistence and testing
+```console
+alembic revision --autogenerate -m "Commit message"
+alembic upgrade head
+```
 
-Named volumes retain data across `docker compose down`. Using `down -v` deletes
-both application databases. Existing PostgreSQL roles/passwords are initialized
-in the volume; changing environment variables does not alter those roles.
+Check out the [Alembic](https://github.com/sqlalchemy/alembic){:target="_blank"}
+repository for more information on how to use (for example how to revert
+migrations).
 
-Tests must use disposable databases. The original `tests/` suite uses
-`TEST_DB_NAME`; cross-service tests use two explicitly supplied test URLs.
-Both can remove stored test data. See [testing](../../development/testing.md).
+## Clear or Initialise the database
+
+If you wish clear or reset the database you can do this with `api-admin db
+drop`. This will drop all tables and reset the database, destroying all data.
+Note that you will need to either run `api-admin db upgrade` or `api-admin db
+init` again before the database is usable.
+
+## CLI options for the Database
+
+Look at the built-in help for more details :
+
+```console
+$ api-admin db --help
+Usage: api-admin db [OPTIONS] COMMAND [ARGS]...
+
+ Control the Database.
+
+Options:
+  --help          Show this message and exit.
+
+Commands:
+  drop            Drop all tables and reset the Database
+  init            Re-Initialise the database using Alembic.
+  revision        Create a new revision.
+  upgrade         Apply the latest Database Migrations.
+```

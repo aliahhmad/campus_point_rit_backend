@@ -1,19 +1,11 @@
-# Live Swagger documentation
+# Interactive API Docs
 
-Start the services, then open:
+The interative API below is auto-generated from the OpenAPI specification for
+this API.
 
-- [Campus Swagger](http://localhost:8001/docs)
-- [Points Swagger](http://localhost:8003/docs)
+!!! note
+    There is not a real API or Database backing this, so the 'Try It Out'
+    option is disabled. You can access a working version of this by installing
+    the template and running the FastAPI server, then visiting the `/docs` path.
 
-Campus Swagger includes `API_ROOT` in its address when a prefix is configured.
-Each application exposes its generated schema at `/openapi.json`; the schema
-URL itself follows FastAPI's default and does not use Campus's router prefix.
-
-Use an access token or account credentials through Swagger's authorization
-controls for public protected endpoints. Internal participant and wallet actions
-require `X-Service-Token` and are intended for service communication. Use demo
-data before trying write operations interactively.
-
-This static documentation site does not embed a frozen OpenAPI JSON file.
-The running service is the source of exact current schemas and response models.
-ReDoc is disabled for Campus. See [the API catalog](api.md) for endpoint groups.
+<swagger-ui src="./openapi.json">

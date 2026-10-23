@@ -1,15 +1,1 @@
 .venv
-.env
-.env.*
-!.env.example
-.git
-.codex
-.agents
-__pycache__
-*.pyc
-.pytest_cache
-.ruff_cache
-.mypy_cache
-.coverage*
-htmlcov
-logs

@@ -38,7 +38,6 @@ USER_EXAMPLE = {
     "role": ExampleUser.role,
     "banned": ExampleUser.banned,
     "verified": ExampleUser.verified,
-    "violations": 0,
 }
 
 PAGINATED_USERS_EXAMPLE = {
