@@ -43,3 +43,15 @@ class ExpiryPreparation(BaseModel):
     operation: Literal["expire_request"] = "expire_request"
     owner_id: int = Field(gt=0, le=2_147_483_647, strict=True)
     request_id: int = Field(gt=0, le=2_147_483_647, strict=True)
+
+
+class AdminAcceptancePreparation(AcceptancePreparation):
+    """Identify the administrator resolving a conflicted request."""
+
+    admin_id: int = Field(gt=0, le=2_147_483_647, strict=True)
+
+
+class AdminExpiryPreparation(ExpiryPreparation):
+    """Authorize an administrator's refund despite visible responses."""
+
+    admin_id: int = Field(gt=0, le=2_147_483_647, strict=True)

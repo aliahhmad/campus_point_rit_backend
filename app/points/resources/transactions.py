@@ -11,6 +11,8 @@ from app.points.managers.refund import prepare_refund
 from app.points.security import require_service_token
 from app.transactions.schemas import (
     AcceptancePreparation,
+    AdminAcceptancePreparation,
+    AdminExpiryPreparation,
     ExpiryPreparation,
     RequestPreparation,
 )
@@ -33,7 +35,8 @@ async def prepare_points(
 
 @router.post("/{transaction_id}/prepare-acceptance")
 async def prepare_points_acceptance(
-    transaction_id: UUID, payload: AcceptancePreparation
+    transaction_id: UUID,
+    payload: AcceptancePreparation | AdminAcceptancePreparation,
 ) -> dict[str, str]:
     """Prepare escrow release, recipient credit, and reward ledger together."""
     await prepare_acceptance(transaction_id, payload)
@@ -42,7 +45,8 @@ async def prepare_points_acceptance(
 
 @router.post("/{transaction_id}/prepare-refund")
 async def prepare_points_refund(
-    transaction_id: UUID, payload: ExpiryPreparation
+    transaction_id: UUID,
+    payload: ExpiryPreparation | AdminExpiryPreparation,
 ) -> dict[str, str]:
     """Prepare owner credit, escrow settlement, and the refund ledger."""
     await prepare_refund(transaction_id, payload)

@@ -14,8 +14,9 @@ pending-moderation responses do not block expiry or refunds. A saved visible
 response still counts if its creation acknowledgement is unfinished. A response
 still in a prepared transaction holds a lock on the parent; the scanner skips
 that request until a later pass. New responses and acceptance remain forbidden
-after the deadline, even before the scanner runs. Resolving conflicted requests
-is outside this flow; it does not automatically choose or pay a contributor.
+after the deadline, even before the scanner runs. Administrators can resolve
+conflicts through the [award or refund actions](conflict-resolution.md). The
+scanner does not automatically choose or pay a contributor.
 
 The scanner also revisits requests already marked `expired` by the older
 status-only implementation. Those with visible responses become `conflicted`;

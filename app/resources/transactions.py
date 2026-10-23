@@ -14,6 +14,8 @@ from app.managers.request_participant import finish_request, prepare_request
 from app.transactions.postgres import connection, protocol_error
 from app.transactions.schemas import (
     AcceptancePreparation,
+    AdminAcceptancePreparation,
+    AdminExpiryPreparation,
     ExpiryPreparation,
     RequestPreparation,
 )
@@ -62,7 +64,8 @@ async def prepare_campus(
 
 @router.post("/{transaction_id}/prepare-acceptance")
 async def prepare_campus_acceptance(
-    transaction_id: UUID, payload: AcceptancePreparation
+    transaction_id: UUID,
+    payload: AcceptancePreparation | AdminAcceptancePreparation,
 ) -> dict[str, str]:
     """Prepare one validated response selection in the Campus database."""
     await prepare_acceptance(transaction_id, payload)
@@ -71,9 +74,10 @@ async def prepare_campus_acceptance(
 
 @router.post("/{transaction_id}/prepare-expiry")
 async def prepare_campus_expiry(
-    transaction_id: UUID, payload: ExpiryPreparation
+    transaction_id: UUID,
+    payload: ExpiryPreparation | AdminExpiryPreparation,
 ) -> dict[str, str]:
-    """Prepare guarded expiry as Campus's part of an automatic refund."""
+    """Prepare guarded expiry for automatic or administrator refunds."""
     await prepare_expiration(transaction_id, payload)
     return {"result": "yes"}
 

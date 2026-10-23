@@ -1,4 +1,4 @@
-"""Let request owners accept one response and release its held reward."""
+"""Let owners accept responses and administrators resolve conflicts."""
 
 from typing import Annotated, cast
 
@@ -19,6 +19,7 @@ from app.database.db import get_database_manual
 from app.managers.acceptance import create_acceptance_transaction
 from app.managers.coordinator import advance_operation
 from app.managers.security import get_current_user
+from app.models.enums import RoleType
 from app.models.user import User
 from app.schemas.response.acceptance import ResponseAcceptanceResult
 
@@ -63,6 +64,7 @@ async def accept_response(  # noqa: PLR0913
                 idempotency_key,
                 current_user.id,
                 session,
+                is_admin=current_user.role == RoleType.admin,
             )
         result = cast(
             "ResponseAcceptanceResult", await advance_operation(operation.id)
@@ -73,6 +75,7 @@ async def accept_response(  # noqa: PLR0913
             code = result.error_code or "service_unavailable"
             failure_status = {
                 "request_owner_required": 403,
+                "admin_required": 403,
                 "self_response_forbidden": 403,
                 "request_not_found": 404,
                 "response_not_found": 404,
@@ -80,6 +83,8 @@ async def accept_response(  # noqa: PLR0913
                 "request_not_open": 409,
                 "request_not_visible": 409,
                 "request_expired": 409,
+                "request_not_conflicted": 409,
+                "request_not_expired": 409,
                 "idempotency_conflict": 409,
                 "escrow_not_found": 409,
                 "escrow_mismatch": 409,

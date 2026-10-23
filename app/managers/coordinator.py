@@ -29,6 +29,8 @@ from app.schemas.response.operation import OperationResult
 from app.transactions.postgres import connection, lock_key, protocol_error
 from app.transactions.schemas import (
     AcceptancePreparation,
+    AdminAcceptancePreparation,
+    AdminExpiryPreparation,
     ExpiryPreparation,
     RequestPreparation,
     ResponsePreparation,
@@ -259,10 +261,24 @@ async def preparation_payload(
         else operation["payload"]
     )
     if operation["operation"] == "expire_request":
+        if "admin_id" in details:
+            return AdminExpiryPreparation(
+                request_id=operation["request_id"],
+                owner_id=details["requester_id"],
+                admin_id=operation["owner_id"],
+            )
         return ExpiryPreparation(
             request_id=operation["request_id"], owner_id=operation["owner_id"]
         )
     if operation["operation"] == "accept_response":
+        if "admin_id" in details:
+            return AdminAcceptancePreparation(
+                request_id=operation["request_id"],
+                response_id=operation["response_id"],
+                contributor_id=details["contributor_id"],
+                owner_id=details["requester_id"],
+                admin_id=operation["owner_id"],
+            )
         return AcceptancePreparation(**details, owner_id=operation["owner_id"])
     if operation["operation"] == "create_response":
         response_id = operation["response_id"]

@@ -5,8 +5,12 @@ from uuid import UUID
 import asyncpg
 
 from app.database.db import get_database_url
+from app.managers.conflict_resolution import (
+    check_conflict_resolution_allowed,
+    verify_resolution_admin,
+)
 from app.transactions.postgres import prepare, protocol_error
-from app.transactions.schemas import ExpiryPreparation
+from app.transactions.schemas import AdminExpiryPreparation, ExpiryPreparation
 
 
 async def expire_unanswered_request(
@@ -14,7 +18,7 @@ async def expire_unanswered_request(
     _transaction_id: UUID,
     payload: ExpiryPreparation,
 ) -> None:
-    """Recheck the deadline and absence of visible answers under a lock."""
+    """Guard automatic refunds or validate an administrator resolution."""
     parent = await conn.fetchrow(
         "SELECT *,expires_at <= CURRENT_TIMESTAMP AS overdue "
         "FROM requests WHERE id=$1 FOR UPDATE",
@@ -33,7 +37,14 @@ async def expire_unanswered_request(
         raise protocol_error(code="request_not_open")
     if not parent["overdue"]:
         raise protocol_error(code="request_not_expired")
-    if await conn.fetchval(
+    if isinstance(payload, AdminExpiryPreparation):
+        await verify_resolution_admin(conn, payload.admin_id)
+        check_conflict_resolution_allowed(
+            request_status=parent["status"],
+            expires_at=parent["expires_at"],
+            accepted_response_id=parent["accepted_response_id"],
+        )
+    elif await conn.fetchval(
         "SELECT EXISTS (SELECT 1 FROM responses WHERE request_id=$1 "
         "AND moderation_status='visible')",
         payload.request_id,

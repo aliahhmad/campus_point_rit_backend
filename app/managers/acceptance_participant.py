@@ -6,8 +6,15 @@ import asyncpg
 
 from app.database.db import get_database_url
 from app.managers.acceptance import check_acceptance_allowed
+from app.managers.conflict_resolution import (
+    check_conflict_resolution_allowed,
+    verify_resolution_admin,
+)
 from app.transactions.postgres import prepare, protocol_error
-from app.transactions.schemas import AcceptancePreparation
+from app.transactions.schemas import (
+    AcceptancePreparation,
+    AdminAcceptancePreparation,
+)
 
 
 async def accept_response(
@@ -25,14 +32,24 @@ async def accept_response(
     )
     if parent is None:
         raise protocol_error(code="request_not_found", status_code=404)
-    check_acceptance_allowed(
-        requester_id=parent["requester_id"],
-        owner_id=payload.owner_id,
-        request_status=parent["status"],
-        moderation_status=parent["moderation_status"],
-        expires_at=parent["expires_at"],
-        accepted_response_id=parent["accepted_response_id"],
-    )
+    if isinstance(payload, AdminAcceptancePreparation):
+        await verify_resolution_admin(conn, payload.admin_id)
+        if parent["requester_id"] != payload.owner_id:
+            raise protocol_error(code="request_owner_required", status_code=403)
+        check_conflict_resolution_allowed(
+            request_status=parent["status"],
+            expires_at=parent["expires_at"],
+            accepted_response_id=parent["accepted_response_id"],
+        )
+    else:
+        check_acceptance_allowed(
+            requester_id=parent["requester_id"],
+            owner_id=payload.owner_id,
+            request_status=parent["status"],
+            moderation_status=parent["moderation_status"],
+            expires_at=parent["expires_at"],
+            accepted_response_id=parent["accepted_response_id"],
+        )
     selected = await conn.fetchrow(
         "SELECT r.* FROM responses r WHERE r.id=$1 AND r.request_id=$2 "
         "AND r.moderation_status='visible' AND EXISTS ("

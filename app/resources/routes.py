@@ -12,6 +12,7 @@ from app.resources import (
     heartbeat,
     home,
     location,
+    refund,
     transactions,
     user,
     wallet,
@@ -26,6 +27,7 @@ api_router.include_router(api_key.router)
 api_router.include_router(campus_request.router)
 api_router.include_router(campus_response.router)
 api_router.include_router(acceptance.router)
+api_router.include_router(refund.router)
 api_router.include_router(location.router)
 api_router.include_router(transactions.router)
 api_router.include_router(heartbeat.router)

@@ -1,7 +1,9 @@
 # Accept a response and release its reward
 
-Only the request owner can select a response. Campus and Points coordinate this
-action with the same native PostgreSQL two-phase commit used for request
+The request owner can select a response before expiry. Administrators can use
+the same endpoint to resolve an overdue `conflicted` request; see
+[administrator conflict resolution](conflict-resolution.md). Campus and Points
+coordinate this action with the same native PostgreSQL two-phase commit used for request
 creation. A successful acceptance completes the request and transfers its
 existing five-point escrow to the selected contributor, adding one to that
 contributor's reputation in the same transaction.
@@ -73,11 +75,13 @@ Request creation, request lists, and request detail responses now include
 
 ## Eligibility and errors
 
-The request must be confirmed, visible, unexpired, and either `open` or
+For ordinary owner acceptance, the request must be confirmed, visible, unexpired,
+and either `open` or
 `under_review`, with no previously accepted response. The selected answer must
 belong to that request, have a finished committed creation operation, and be
 `visible`. Hidden or pending answers cannot be selected. Expired and conflicted
-requests cannot accept a new selection. Contributors cannot
+requests cannot accept a new owner selection; administrators may resolve
+conflicted requests through this endpoint. Contributors cannot
 receive their own request's reward. The same rules are checked again during
 Campus preparation under row locks.
 
