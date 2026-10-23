@@ -59,7 +59,7 @@ docker compose exec campus-db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER"
 The prompt changes from your normal shell to the PostgreSQL prompt, for example:
 
 ```text
-api_template=#
+campuspoint_campus=#
 ```
 
 Run the next commands inside this PostgreSQL session. The temporary table
@@ -122,7 +122,7 @@ duplicates. Existing rows keep their names and active status. Updating existing
 location details requires a separate update.
 
 The insert runs in a transaction. If the prompt contains `!`, such as
-`api_template=!#`, a command has failed. Enter `ROLLBACK;`, fix the reported
+`campuspoint_campus=!#`, a command has failed. Enter `ROLLBACK;`, fix the reported
 problem, and repeat steps 4 through 6. Check that every SQL statement ends
 with a semicolon and that `\copy` is entered on its own line. If the CSV file
 cannot be found, repeat step 2 from another normal terminal first.
@@ -153,8 +153,7 @@ npm run dev
 ```
 
 Campus API documentation is at <http://localhost:8001/docs>; the frontend is
-at <http://localhost:5173>. A locations API endpoint is a separate implementation
-step; importing the table does not add an HTTP endpoint.
+at <http://localhost:5173>. Authenticated `GET /locations` returns active locations for the creation form.
 
 ## Later starts
 

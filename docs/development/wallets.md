@@ -15,8 +15,9 @@ and rolls back the new Campus user. Retrying registration is then possible.
 Points initialization is idempotent: repeating it for an existing wallet
 preserves its current balance and never issues a second opening grant.
 
-The two services have separate commits. Full crash recovery across both
-databases belongs to the planned distributed transaction implementation.
+Wallet initialization does not use the request 2PC coordinator. Registration
+has separate local commits; the request/reward/refund recovery workers do not
+make registration globally atomic.
 
 ## Setup
 
@@ -35,9 +36,9 @@ From `backend/`, rebuild and start the services:
 docker compose up --build -d --wait
 ```
 
-Startup applies Points migration `points_0003`, which enforces one opening
-grant per user. Existing accounts in this workspace have already been funded
-once. No startup scan or backfill command is needed.
+Startup applies the current Points migration head, including one opening grant
+per user. Initialization occurs during account creation; GET reads do not
+backfill missing wallets or issue grants.
 
 ## Profile points and reputation
 

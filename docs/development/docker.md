@@ -1,23 +1,37 @@
-# Develop with Docker
+# Container development
 
-CampusPoint now uses four containers: `campus-api`, `points-api`, `campus-db`,
-and `points-db`. The previous template service names `api`, `db`, and `cache`
-are no longer part of the main Compose file.
-
-For first-time setup, follow [Load campus locations](locations.md). It starts
-the Campus database, applies migrations, and imports the bundled CSV before
-starting the APIs and frontend.
-
-For later runs, from `backend/`, run:
+The default stack has `campus-api`, `points-api`, `campus-db`, and `points-db`.
+Follow [quick start](../quick-start.md) for the initial `.env` and location import.
 
 ```sh
-colima start
-docker compose up --build -d --wait
+docker compose up --build -d --wait points-api
+docker compose up --build -d --wait campus-api
 docker compose ps
 ```
 
-Campus API documentation: <http://localhost:8001/docs>.
-Points API documentation: <http://localhost:8003/docs>.
+Each API runs its own migrations before starting Uvicorn with development
+reload enabled. The source checkout is mounted into API containers; dependencies
+live in container environments. Rebuild images after dependency changes.
 
-The [locations guide](locations.md) includes the import commands, verification,
-and help distinguishing the normal terminal from the PostgreSQL prompt.
+After changing `.env`, recreate the affected APIs so environment values reload:
+
+```sh
+docker compose up -d --force-recreate --wait points-api
+docker compose up -d --force-recreate --wait campus-api
+```
+
+For logs and normal shutdown:
+
+```sh
+docker compose logs --tail=100 -f campus-api points-api
+docker compose down
+```
+
+Normal shutdown preserves named PostgreSQL volumes. `down -v` deletes them.
+Do not delete volumes to resolve a stuck 2PC operation; inspect the recorded
+decision and restore service connectivity for recovery.
+
+Host database ports are 5433/5434; container-to-database traffic uses Docker DNS
+and port 5432. Public API bindings are loopback-only. See
+[databases](../usage/configuration/database.md), [testing](testing.md), and
+[deployment](../deployment/deployment.md).

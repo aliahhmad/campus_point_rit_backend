@@ -34,7 +34,7 @@ accessible only to its owner. The check runs locally; database and Points servic
 errors retain their existing transaction behavior. This is a basic word check
 and does not detect every form of abuse or deliberate spelling obfuscation.
 
-Override the list in `backend/.env` and restart Campus, for example:
+Override the list in `backend/.env` and recreate Campus, for example:
 
 ```dotenv
 MODERATION_BLOCKED_WORDS=fuck,shit,bitch,asshole

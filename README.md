@@ -691,6 +691,10 @@ uv run python -m pymarkdown scan README.md
 
 Detailed contracts and setup notes:
 
+- [Documentation overview](docs/index.md)
+- [Two-phase commit protocol](docs/development/two-phase-commit.md)
+- [Recovery workers and expiry scanning](docs/development/recovery.md)
+- [Migrations and testing](docs/development/testing.md)
 - [Location import](docs/development/locations.md)
 - [Wallet initialization and profile reads](docs/development/wallets.md)
 - [Request creation and escrow](docs/development/requests.md)

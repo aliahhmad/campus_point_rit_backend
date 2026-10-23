@@ -31,7 +31,7 @@ Reputation stays unchanged during refunds and conflict classification.
 
 ## Schedule
 
-Set a positive interval in `backend/.env`, then restart Campus:
+Set a positive interval in `backend/.env`, then recreate Campus:
 
 ```dotenv
 REQUEST_EXPIRY_SCAN_INTERVAL_SECONDS=60
