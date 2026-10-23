@@ -6,6 +6,7 @@ import asyncpg
 
 from app.database.db import get_database_url
 from app.managers.moderation import auto_moderate_request
+from app.models.enums import ModerationStatus
 from app.transactions.postgres import (
     connection,
     finish,
@@ -25,6 +26,9 @@ async def insert_request(
     )
     if location is None:
         raise protocol_error(code="invalid_location", status_code=422)
+    moderation_status = auto_moderate_request(
+        payload.title, payload.description
+    )
     await conn.execute(
         (
             "INSERT INTO requests "
@@ -36,8 +40,13 @@ async def insert_request(
         payload.location_id,
         payload.title,
         payload.description,
-        auto_moderate_request(payload.title, payload.description).value,
+        moderation_status.value,
     )
+    if moderation_status == ModerationStatus.hidden:
+        await conn.execute(
+            "UPDATE users SET violations=violations+1 WHERE id=$1",
+            payload.owner_id,
+        )
 
 
 async def prepare_request(

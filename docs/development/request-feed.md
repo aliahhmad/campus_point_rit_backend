@@ -43,6 +43,12 @@ MODERATION_BLOCKED_WORDS=fuck,shit,bitch,asshole
 An empty list approves all new content. Existing requests keep their saved
 moderation status. No manual approval/rejection actions are implemented yet.
 
+Each newly committed hidden request increments its author's `violations` once,
+regardless of the number of blocked words. The counter starts at zero for both
+existing and new users. Visible requests and pending moderation failures do not
+count. The increment shares the native Campus transaction with request creation;
+aborts roll it back, and idempotent retries do not repeat it.
+
 The list refreshes every five seconds. Search, filters, and pagination are
 stored in the page URL.
 

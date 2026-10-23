@@ -1,6 +1,6 @@
 """Define the Users model."""
 
-from sqlalchemy import Boolean, Enum, String
+from sqlalchemy import Boolean, CheckConstraint, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.db import Base
@@ -11,6 +11,9 @@ class User(Base):
     """Define the Users model."""
 
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("violations >= 0", name="violations_nonnegative"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(120), unique=True, index=True)
@@ -25,6 +28,9 @@ class User(Base):
     )
     banned: Mapped[bool] = mapped_column(Boolean, default=False)
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    violations: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
 
     # Relationships
     api_keys = relationship(

@@ -61,6 +61,7 @@ class UserAdmin(ModelView, model=User):
         User.verified,
         User.role,
         User.banned,
+        User.violations,
     ]
 
     column_labels: ClassVar[dict[str | InstrumentedAttribute[Any], str]] = {
@@ -69,13 +70,17 @@ class UserAdmin(ModelView, model=User):
         "verified": "Verified",
         "role": "Role",
         "banned": "Banned",
+        "violations": "Violations",
         "first_name": "First Name",
         "last_name": "Last Name",
         "api_keys": "API Keys",
     }
 
     column_details_exclude_list: ClassVar[list[Any]] = [User.password]
-    form_excluded_columns: ClassVar[list[Any]] = [User.api_keys]
+    form_excluded_columns: ClassVar[list[Any]] = [
+        User.api_keys,
+        User.violations,
+    ]
 
     form_create_rules: ClassVar[list[str]] = [
         "email",

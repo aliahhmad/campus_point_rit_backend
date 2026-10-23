@@ -16,6 +16,7 @@ class UserResponse(UserBase):
     role: RoleType = Field(examples=[ExampleUser.role])
     banned: bool = Field(examples=[ExampleUser.banned])
     verified: bool = Field(examples=[ExampleUser.verified])
+    violations: int = Field(default=0, ge=0)
 
 
 class MyUserResponse(UserBase):
@@ -23,3 +24,4 @@ class MyUserResponse(UserBase):
 
     first_name: str = Field(examples=[ExampleUser.first_name])
     last_name: str = Field(examples=[ExampleUser.last_name])
+    violations: int = Field(default=0, ge=0)

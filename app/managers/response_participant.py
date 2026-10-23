@@ -7,6 +7,7 @@ import asyncpg
 from app.database.db import get_database_url
 from app.managers.campus_response import check_response_allowed
 from app.managers.moderation import auto_moderate_request
+from app.models.enums import ModerationStatus
 from app.transactions.postgres import prepare, protocol_error
 from app.transactions.schemas import ResponsePreparation
 
@@ -33,6 +34,7 @@ async def insert_response(
         parent["status"],
         parent["expires_at"],
     )
+    moderation_status = auto_moderate_request("", payload.answer)
     response_id = await conn.fetchval(
         "INSERT INTO responses "
         "(id,request_id,contributor_id,answer,moderation_status) "
@@ -42,10 +44,15 @@ async def insert_response(
         payload.request_id,
         payload.owner_id,
         payload.answer,
-        auto_moderate_request("", payload.answer).value,
+        moderation_status.value,
     )
     if response_id is None:
         raise protocol_error(code="duplicate_response")
+    if moderation_status == ModerationStatus.hidden:
+        await conn.execute(
+            "UPDATE users SET violations=violations+1 WHERE id=$1",
+            payload.owner_id,
+        )
 
 
 async def prepare_response(

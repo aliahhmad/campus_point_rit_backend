@@ -26,6 +26,11 @@ Use the running [Swagger UI](../reference/swagger.md) for exact payloads,
 parameters, and response models. `/users/` returns a paginated object when no
 `user_id` is supplied, and one account when it is supplied.
 
+Profile and administrator user responses include the read-only `violations`
+counter. Newly committed requests or responses hidden by moderation add one;
+visible/pending content and retries do not. Existing users start at zero when
+the migration is applied.
+
 JWT authentication uses `Authorization: Bearer <access-token>`. Refresh tokens
 are separate from access tokens and must be sent to `/refresh/`; unverified or
 banned users cannot use protected APIs. Access tokens default to 120 minutes;

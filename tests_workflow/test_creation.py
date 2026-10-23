@@ -349,3 +349,23 @@ async def test_prepare_payload_conflict(workflow: Workflow) -> None:
         )
     assert response.status_code == status.HTTP_409_CONFLICT
     await assert_counts(workflow, 95, 1)
+
+
+async def test_hidden_request_points_abort_does_not_add_violation(
+    workflow: Workflow,
+) -> None:
+    """A hidden request rolled back by Points does not penalize its author."""
+    async with connection(workflow.points_url) as conn:
+        await conn.execute(
+            "UPDATE wallets SET available_points=0 WHERE user_id=1"
+        )
+    result = await workflow.client.post(
+        URL, json=BODY | {"title": "SHIT!"}, headers=HEADER
+    )
+    assert result.status_code == status.HTTP_409_CONFLICT, result.text
+    assert result.json()["detail"]["code"] == "insufficient_points"
+    async with connection(workflow.campus_url) as conn:
+        assert (
+            await conn.fetchval("SELECT violations FROM users WHERE id=1") == 0
+        )
+        assert await conn.fetchval("SELECT count(*) FROM requests") == 0

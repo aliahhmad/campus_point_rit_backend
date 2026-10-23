@@ -114,7 +114,7 @@ async def test_creation_saves_moderation_status(
         description=description,
     )
     await insert_request(conn, uuid4(), payload)
-    conn.execute.assert_awaited_once_with(
+    conn.execute.assert_any_await(
         "INSERT INTO requests "
         "(id,requester_id,location_id,title,description,moderation_status) "
         "VALUES ($1,$2,$3,$4,$5,$6)",

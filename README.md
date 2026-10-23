@@ -242,6 +242,12 @@ blocklist. Matching is case-insensitive and checks literal whole words:
 An empty blocklist approves all new content. Updating it does not retroactively
 recheck existing rows. This is a local word check, not an external AI service.
 
+Each user has a nonnegative `violations` counter, initially zero. A newly
+committed request or response hidden by moderation adds one violation to its
+author. Visible or pending content does not count. The increment is part of
+the Campus participant transaction, so rollback and retries do not add extra
+violations. Existing profile and administrator user APIs include the counter.
+
 Only confirmed creations appear in reads. Published requests are available to
 other authenticated users; hidden/pending requests are owner-only. A response's
 hidden/pending content is contributor-only, subject to access to its parent.

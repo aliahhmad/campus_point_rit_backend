@@ -74,6 +74,10 @@ The same configured abusive-word check used for request creation checks the
 answer. A successful clean check produces `visible`; a blocked word produces
 `hidden`; a failed moderation check produces `pending` and logs the error.
 
+A committed hidden response adds one to its contributor's `violations` counter.
+Visible or pending responses, rejected duplicates, aborted transactions, and
+retries do not add violations. The increment shares the response transaction.
+
 Visible answers can be read by users who can access the parent request.
 Hidden and pending answers are visible only to their contributor. The requester
 cannot see another contributor's hidden or pending answer. Unfinished creation
