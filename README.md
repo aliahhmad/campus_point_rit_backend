@@ -1,382 +1,704 @@
-# CampusPoint backend <!-- omit in toc -->
+# CampusPoint backend
 
-CampusPoint runs four development containers: `campus-api`, `points-api`,
-`campus-db`, and `points-db`. The existing `app/` routes are the Campus API;
-`app/points/` contains the separate Points API and its own database metadata.
+CampusPoint is a campus request-and-response application with a five-point
+reward system. Its backend consists of two FastAPI services, each owning a
+PostgreSQL database. The Campus service coordinates native PostgreSQL two-phase
+commit (2PC) whenever a request action must also settle points.
 
-For first-time setup, follow [Load campus locations](docs/development/locations.md)
-to apply migrations and import the bundled CSV before starting the APIs and
-frontend. For later runs, start Colima and the services from this directory:
+This backend includes authentication and account administration, location
+selection, automatic content moderation, request and response APIs, escrowed
+rewards, acceptance and reputation awards, expiry refunds, administrator conflict
+resolution, and background transaction recovery.
 
-```console
-colima start
-docker compose up --build -d --wait
+## Contents
+
+- [Architecture](#architecture)
+- [Run locally](#run-locally)
+- [Configuration](#configuration)
+- [Accounts and administration](#accounts-and-administration)
+- [Requests, moderation, and accounting](#requests-moderation-and-accounting)
+- [Public API](#public-api)
+- [Two-phase commit](#two-phase-commit)
+- [Recovery loops and expiry scanning](#recovery-loops-and-expiry-scanning)
+- [Database inspection](#database-inspection)
+- [Migrations and checks](#migrations-and-checks)
+- [Troubleshooting](#troubleshooting)
+- [Code and detailed documentation](#code-and-detailed-documentation)
+
+## Architecture
+
+| Service | Responsibility | Local address |
+| --- | --- | --- |
+| `campus-api` | Users, authentication, locations, requests, responses, moderation, 2PC coordinator | `http://localhost:8001` |
+| `points-api` | Wallets, reputation, escrow, points ledger, Points participant and recovery | `http://localhost:8003` |
+| `campus-db` | Campus records and durable coordinator state | `localhost:5433` |
+| `points-db` | Wallets, escrow, ledger, and Points participant journal | `localhost:5434` |
+
+The frontend calls Campus. Campus calls Points over HTTP using the shared
+`X-Service-Token` credential. Points calls Campus to obtain recorded transaction
+decisions. Neither service connects directly to the other service's database;
+IDs shared across the boundary do not have cross-database foreign keys.
+
+The Compose configuration runs PostgreSQL 18.1 and enables
+`max_prepared_transactions=100` on both databases. Database volumes survive normal
+container stops and recreation. Published service and database ports are bound
+to loopback for local development.
+
+## Run locally
+
+### Requirements
+
+- Docker with Docker Compose. Docker Desktop or Colima can provide the runtime.
+- For Python tools outside containers: Python 3.10–3.14 and `uv`.
+- A configured `backend/.env`. Commands below run from this backend directory.
+
+### 1. Configure the environment
+
+On first setup:
+
+```sh
+cp .env.example .env
+```
+
+Keep an existing configured `.env` when updating the project. Replace the
+placeholder Campus database credentials, Points database password, JWT secret,
+and shared service token. Generate a separate random value for each secret:
+
+```sh
+openssl rand -hex 32
+```
+
+Also add or update these local settings:
+
+```env
+I_READ_THE_DAMN_DOCS=true
+DB_ADDRESS=localhost
+DB_PORT=5433
+POINTS_DB_ADDRESS=localhost
+POINTS_DB_PORT=5434
+BASE_URL=http://localhost:8001
+FRONTEND_URL=http://localhost:5173
+CORS_ORIGINS=http://localhost:5173
+```
+
+`I_READ_THE_DAMN_DOCS=true` is required by the existing Campus startup guard.
+The host database ports above are for tools running outside Docker. Compose
+supplies container database addresses and port 5432 to the APIs automatically.
+Use a separate `TEST_DB_NAME` for the Campus test database.
+
+### 2. Initialize the databases and locations
+
+Start your Docker runtime first. With Colima, run `colima start`.
+
+```sh
+docker compose up -d --wait campus-db points-db
+docker compose run --build --rm --no-deps campus-api alembic upgrade head
+```
+
+Before creating requests, import the bundled
+[app/database/rit_locations.csv](app/database/rit_locations.csv). Follow
+[Load campus locations](docs/development/locations.md) for the import commands.
+Migrations create the location table; they do not import the CSV. Repeated
+imports skip existing building codes.
+
+### 3. Start the APIs
+
+Start Points before Campus so the initial recovery and expiry passes can reach
+both services:
+
+```sh
+docker compose up --build -d --wait points-api
+docker compose up --build -d --wait campus-api
 docker compose ps
 ```
 
-Campus API docs: <http://localhost:8001/docs>.
-Points API docs: <http://localhost:8003/docs>.
+Each API applies its own Alembic migrations before starting. For later starts,
+the same commands reuse the existing database volumes and imported locations.
 
-Account creation calls Points to create a wallet and its one-time 100-point
-grant before registration succeeds. See
-[wallet initialization](docs/development/wallets.md) for setup and verification.
+| Endpoint | Purpose |
+| --- | --- |
+| `http://localhost:8001/docs` | Campus Swagger UI |
+| `http://localhost:8003/docs` | Points Swagger UI; internal actions require the service token |
+| `http://localhost:8001/heartbeat` | Campus heartbeat |
+| `http://localhost:8003/ready` | Points database readiness |
 
-The authentication foundation comes from the FastAPI template documented below.
+Campus URLs include `API_ROOT` when configured; Points URLs do not use that
+prefix.
 
-## FastAPI Application Template
+### Restart, update, and stop
 
-![GitHub Release](https://img.shields.io/github/v/release/seapagan/fastapi-template)
-[![Ruff](https://github.com/seapagan/fastapi-template/actions/workflows/ruff.yml/badge.svg)](https://github.com/seapagan/fastapi-template/actions/workflows/ruff.yml)
-[![Tests](https://github.com/seapagan/fastapi-template/actions/workflows/tests.yml/badge.svg)](https://github.com/seapagan/fastapi-template/actions/workflows/tests.yml)
-[![Code Coverage](https://app.codacy.com/project/badge/Coverage/82085ec100b64e73bea63b5942371e94)](https://app.codacy.com/gh/seapagan/fastapi-template/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_coverage)
-[![Code Quality](https://app.codacy.com/project/badge/Grade/82085ec100b64e73bea63b5942371e94)](https://app.codacy.com/gh/seapagan/fastapi-template/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![pages-build-deployment](https://github.com/seapagan/fastapi-template/actions/workflows/pages/pages-build-deployment/badge.svg)](https://github.com/seapagan/fastapi-template/actions/workflows/pages/pages-build-deployment)
+For code updates, rerun the build/start commands above. After changing `.env`,
+recreate the services to load the new environment:
 
-This is a template Repository for starting a new
-[FastAPI](https://fastapi.tiangolo.com/) project with Authentication and Users,
-with Authorization already baked-in.
-
----
-
-**📚 [Full Documentation](https://api-template.seapagan.net) | 🚀 [Quick Start Guide](https://api-template.seapagan.net/quick-start/)**
-
-Complete documentation is available at **[api-template.seapagan.net][doc]**,
-including setup instructions, API reference, deployment guides, and
-troubleshooting. New users should start with the **[Quick Start
-Guide](https://api-template.seapagan.net/quick-start/)** to get up and running
-in under 5 minutes.
-
----
-
-- [Important note on Versioning](#important-note-on-versioning)
-- [Breaking Changes](#breaking-changes)
-- [Changes from version 0.4.x](#changes-from-version-04x)
-- [Functionality](#functionality)
-- [Installation](#installation)
-- [Docker](#docker)
-  - [Develop on containers](#develop-on-containers)
-  - [Migrations on containers](#migrations-on-containers)
-  - [Testing on containers](#testing-on-containers)
-- [Planned Functionality and Known Bugs](#planned-functionality-and-known-bugs)
-- [Testing](#testing)
-- [Code Quality](#code-quality)
-- [Who is Using this Template?](#who-is-using-this-template)
-- [Contributing](#contributing)
-- [GitHub Discussions](#github-discussions)
-
-## Important note on Versioning
-
-This template versioning has been refactored to start from **Version 0.4.0**.
-
-The original template was written for my own use and probably promoted to V1.0.0
-before it should have been, and there have been many updates and fixes since
-then.
-
-I will keep the old releases available for those who wish to use them (for a
-short time). It's better to do this now before more users need to update their
-projects to future versions.
-
-All releases from now on will also contain a Git patch to upgrade from the
-previous version. This will be in the form of a `.patch` file which can be
-applied to their project using the `git apply` command. This will be documented
-in the release notes.
-
-## Breaking Changes
-
-There will be breaking changes implemented from time to time, as the template is
-still evolving. These may be due to security issues or changes in philosophy.
-These can always be found [here](https://api-template.seapagan.net/important/)
-on the website.
-
-## Changes from version 0.4.x
-
-Starting from version 0.5.0, the template has been refactored to use SQLAlchemy
-2.0 ORM instead of `encode/databases` for database access. This allows for a
-more flexible and powerful Asynchronous database access but does need a bit of
-refactoring for any existing projects. See the [documentation][breaking] for
-more information. I will also be adding a migration guide for those who wish to
-upgrade their existing projects (time permitting).
-
-If you prefer to continue using the 0.4.x branch, you can find it
-[here][legacy-branch].
-
-To use this branch you will need to clone the repository and checkout the
-`0.4.2` branch.
-
-```console
-git clone -b 0.4.2 https://github.com/seapagan/fastapi-template.git
+```sh
+docker compose up -d --force-recreate --wait points-api
+docker compose up -d --force-recreate --wait campus-api
 ```
 
-Be aware that this branch will not be maintained and will not receive any
-updates or bug fixes.
+Inspect service logs or stop the stack:
 
-## Functionality
-
-This template is a ready-to-use boilerplate for a FastAPI project. It has the
-following advantages to starting your own from scratch :
-
-- Baked-in User database and management. Routes are provided to
-  add/edit/delete/search or ban (and unban) Users.
-- Postgresql Integration, using SQLAlchemy ORM, no need for raw SQL queries
-  (unless you want to!). All database usage is Asynchronous. [Alembic][alembic]
-  is used to control database migrations.
-- Register and Login routes provided, both of which return a JWT token to be
-  used in all future requests. JWT Token expires 120 minutes after issue.
-- JWT-based security as a Bearer Token to control access to all your routes.
-- **Password Recovery** system with secure token-based reset flow. Users can
-  request a password reset via email, receiving a time-limited (30 minute)
-  token to securely reset their password. Features built-in HTML forms for
-  standalone use, or optional `FRONTEND_URL` configuration to redirect to
-  custom frontends. Supports both JSON API and form-based submissions. The
-  system protects against email enumeration attacks and includes URL encoding
-  and token validation for security.
-- Passwords must be at least 8 characters and no more than 72 bytes when
-  UTF-8 encoded. On older installations upgraded to `bcrypt` 5, users whose
-  existing password exceeded that limit must reset their password before they
-  can log in again.
-- `API Keys` are fully implemented and can be used by registered users instead
-  of the JWT. These will **not expire** at present though adding expiry is a
-  future plan. API keys are passed using the `X-API-Key` header.
-- A `Refresh Token` with 30 day expiry is sent at time of register or login
-  (never again). This will enable easy re-authentication when the JWT expires
-  without needing to send username or password again, and should be done
-  automatically by the Front-End.
-- A clean layout to help structure your project.
-- An optional **Admin site** to manage users and API keys. This uses the
-  `sqladmin` package to give you an easy way to manage your database.
-- **Category-based logging** using [loguru](https://github.com/Delgan/loguru)
-  with configurable log levels, rotation, retention, and compression. Control
-  what gets logged via `LOG_CATEGORIES` (requests, auth, database, errors,
-  etc.).
-- **Optional response caching** for improved performance and reduced database
-  load. Disabled by default, can be enabled with in-memory or Redis backend.
-  Includes cache invalidation utilities, monitoring, and configurable TTL.
-  Cache hits typically 5-30x faster than database queries (depending on query
-  complexity). Tests run with in-memory caching enabled.
-- **Prometheus metrics** for production observability. Optional metrics
-  collection tracks HTTP performance (requests, latency, in-flight), business
-  metrics (auth failures, API key usage, login attempts), and custom
-  application metrics. Exposed via `/metrics` endpoint when enabled.
-- **Rate limiting** for authentication endpoints to protect against brute force
-  attacks, spam, and abuse. Disabled by default, supports both in-memory (for
-  single-instance) and Redis (for multi-instance) backends. Conservative limits
-  applied to login (5/15min), registration (3/hour), password recovery (3/hour),
-  and other auth routes. Returns HTTP 429 with `Retry-After` header when limits
-  exceeded. Violations tracked via Prometheus metrics when enabled.
-- **Timing attack protection** in authentication flows. Login operations use
-  constant-time password verification to prevent user enumeration, and token
-  validation uses constant-time comparisons for defense-in-depth.
-- **A command-line admin tool**. This allows to configure the project metadata
-  very easily, add users (and make admin), and run a development server. This
-  can easily be modified to add your own functionality (for example bulk add
-  data) since it is based on the excellent [Typer][typer] library.
-- Built-in pagination support for user listing and search endpoints, using
-  `fastapi-pagination`.
-- Easily batch-add random test users to the database for testing/development
-  purposes using the CLI or seed the database with pre-set users from a CSV
-  file.
-- Database and Secrets are automatically read from Environment variables or a
-  `.env` file if that is provided. The CLI can generate and set the JWT Secret
-  and Admin pages encryption keys.
-- User email is validated for correct format on creation (however no checks are
-  performed to ensure the email or domain actually exists).
-- Control permitted CORS Origin through Environment variables.
-- Manager class set up to send emails to users, and by default an email is sent
-  when new users register. The content is set by a template (currently a basic
-  placeholder). This email has a link for the user to confirm their email
-  address - until this is done, the user cannot user the API.
-- A lightweight `/heartbeat` endpoint for uptime/health checks.
-- Docker and Compose file set up to develop and test this API using Docker
-
-**This template is still in very active development and probably not yet ready
-for full production use. However, I am currently using it to develop my own
-projects, which include some production API's without issues. I will update the
-template as I find bugs or add new features. I will also be adding more
-documentation as I go. For the moment, if you wish to use it without getting
-involved in dev, I'd recommend checking out the latest actual
-[Release][latest-release].**
-
-However, the `main` branch should be pretty stable as all development is done on
-the `develop` branch and merged into `main` when ready.
-
-The template **Requires Python 3.10.0** or higher. I actually develop under
-Python 3.14.x where x is the latest patch version available at the time, and
-migrating to the next patch version as soon as it is released. CI tests are run
-automatically on the latest patch levels of Python 3.10 to 3.14.
-
-This template is free to use but I would request some accreditation. If you do
-use it in one of your applications, or even some of the unique code from the
-template, or you learn something from it, please put a small note in your readme
-or blog post/whatever stating that you used this Template or code therein, with
-a link back to this repository. Thank You 😊
-
-For those who let me know they are using this Template, I'll add links back to
-your project in this documentation.
-
-If this template saves you time/effort/money, or you just wish to show your
-appreciation for my work, why not [Sponsor my Work][sponsor] or [Buy me a
-Coffee!][coffee] 😃
-
-## Installation
-
-Click the 'Use this template' button at the top of the Repository on GitHub.
-This will create a new repository in your personal GitHub account (Not a Fork)
-which you can then Clone and start working on.
-
-It is assumed that you have at least some knowledge of [FastAPI][fastapi] to use
-this template, there are very good [Basic][tut-basic] and
-[Advanced][tut-advanced] User Guides on the FastAPI website .
-
-Visit the [Installation Instructions][install] for more detailed installation
-notes, including how to handle the coverage uploader.
-
-## Docker
-
-Note that when run from docker, the API is exposed on port `8001` instead of
-`8000`.
-
-Also, unlike before version 0.5.1, it is no longer required to change the
-`DB_ADDRESS` environment variable when running on docker, this is taken care of
-automatically.
-
-### Develop on containers
-
-> :warning: For local use rename `.env.example` to `.env`.
-
-It is possible to develop directly on Docker containers :
-
-**Using `docker compose up` (recommended):**
-
-```console
-docker compose up
-```
-
-To run and rebuild image (dependency updates):
-
-```console
-docker compose up --build
-```
-
-To remove all containers:
-
-```console
+```sh
+docker compose logs --tail=100 -f campus-api points-api
 docker compose down
 ```
 
-**Using `docker compose run`:**
+`docker compose down` retains database volumes. Adding `-v` deletes the stored
+users, requests, wallets, and transaction history.
 
-First run migrations:
+## Configuration
 
-```console
-docker compose exec campus-api alembic upgrade head
+The full template is [.env.example](.env.example). The main application settings
+are:
+
+| Setting | Purpose |
+| --- | --- |
+| `DB_USER`, `DB_PASSWORD`, `DB_NAME` | Campus database credentials and name |
+| `DB_ADDRESS`, `DB_PORT` | Campus database connection outside Compose; host port is 5433 |
+| `POINTS_DB_USER`, `POINTS_DB_PASSWORD`, `POINTS_DB_NAME` | Separate Points database credentials and name |
+| `POINTS_DB_ADDRESS`, `POINTS_DB_PORT` | Points database connection outside Compose; host port is 5434 |
+| `TEST_DB_NAME` | Disposable database used by the original Campus test suite |
+| `SECRET_KEY` | JWT signing secret; use a generated value of at least 32 characters |
+| `POINTS_SERVICE_TOKEN` | Same nonempty internal HTTP credential in both APIs |
+| `POINTS_API_URL` | Campus-to-Points address; local default `http://localhost:8003` |
+| `POINTS_CAMPUS_API_URL` | Points-to-Campus address, including Campus `API_ROOT` if configured |
+| `API_ROOT` | Optional Campus URL prefix, such as `/v1`; default is empty |
+| `BASE_URL` | Public Campus address used when constructing backend links |
+| `FRONTEND_URL` | Website address for verification and password-reset links |
+| `CORS_ORIGINS` | Comma-separated allowed browser origins |
+| `MODERATION_BLOCKED_WORDS` | Comma-separated words checked in new requests and responses |
+| `REQUEST_EXPIRY_SCAN_INTERVAL_SECONDS` | Positive delay between expiry passes; default 60 seconds |
+| `MAIL_*` | SMTP configuration for account emails |
+
+Compose sets the internal service URLs and database addresses. If you run the
+APIs directly, configure those values yourself. Hostnames such as `campus-db`
+and `points-api` are Docker network addresses, not host-machine addresses.
+
+For a hosted frontend, set its public origin in `CORS_ORIGINS` and its address
+in `FRONTEND_URL`. The frontend's `VITE_API_BASE_URL` must point to the public
+Campus API, including any API prefix. Keep `POINTS_SERVICE_TOKEN`, database
+credentials, and `SECRET_KEY` out of frontend settings and Git.
+
+Optional template facilities include the SQLAdmin interface, logging, caching,
+metrics, and authentication rate limits. Their switches and defaults are listed
+in `.env.example`; Redis is optional.
+
+## Accounts and administration
+
+Authentication supports JWT access/refresh tokens and backend API keys.
+Unverified or banned users cannot use protected APIs. Registration initializes
+a Points wallet with a one-time **100-point opening grant**. Repeating wallet
+initialization preserves the existing balance and does not issue another grant.
+
+Registration waits for Points initialization; a reported initialization failure
+returns 503 and rolls back the new Campus user. This path uses separate local
+commits, not the request 2PC coordinator. It therefore does not have the same
+cross-service crash recovery guarantee as request creation and settlement.
+
+For demo accounts, the CLI can create a user, verify them without email, and
+assign an administrator role:
+
+```sh
+docker compose exec campus-api api-admin user create
+docker compose exec campus-api api-admin user list
 ```
 
-Run containers:
+Use the actual ID from the list in these examples:
 
-```console
-docker compose up -d campus-api points-api
+```sh
+docker compose exec campus-api api-admin user verify 1
+docker compose exec campus-api api-admin user admin 1
 ```
 
-To rebuild image (dependency updates):
+Creation prompts for account details and requires Points to be running. Verify
+and promotion are separate actions. Backend API-key endpoints remain available;
+the current frontend does not provide API-key management pages.
 
-```console
-docker compose build
+## Requests, moderation, and accounting
+
+### Creating and answering requests
+
+- A request contains an active location, a title, and a description. Titles are
+  limited to 200 characters; descriptions and response answers to 5,000.
+- Campus derives ownership, contributor identity, timestamps, and the fixed
+  five-point reward. Clients cannot choose a payout amount or recipient.
+- Creating a request removes five available points and records them in a held
+  escrow. The request expires one hour after creation.
+- Requests have no public edit or delete API.
+- Only other contributors can answer a confirmed, visible, open, unexpired
+  request. `UNIQUE(request_id, contributor_id)` permits one response per user,
+  including hidden or pending responses. Posting an answer does not spend points.
+
+### Moderation and visibility
+
+New request titles/descriptions and response answers use the same configured
+blocklist. Matching is case-insensitive and checks literal whole words:
+
+| Check result | `moderation_status` |
+| --- | --- |
+| No configured word matches | `visible` |
+| A configured word matches | `hidden` |
+| The moderation check fails | `pending` |
+
+An empty blocklist approves all new content. Updating it does not retroactively
+recheck existing rows. This is a local word check, not an external AI service.
+
+Only confirmed creations appear in reads. Published requests are available to
+other authenticated users; hidden/pending requests are owner-only. A response's
+hidden/pending content is contributor-only, subject to access to its parent.
+Request owners cannot read another contributor's unpublished answers.
+
+Request `status`, content `moderation_status`, and operation `status` describe
+different things and should not be treated as interchangeable.
+
+### Acceptance, expiry, and conflicts
+
+| Situation | Request outcome | Points and reputation |
+| --- | --- | --- |
+| Owner accepts a visible response before expiry on a visible `open` or `under_review` request | `completed` with acceptance ID/time | Release held five points to the selected contributor and add one reputation point |
+| Unaccepted request is overdue and has no visible responses | `expired` through refund 2PC | Return held five points to the requester; reputation unchanged |
+| Unaccepted request is overdue and has visible responses | `conflicted` | Keep escrow held |
+| Administrator selects a confirmed visible response on an overdue conflict | `completed` | Same five-point reward and +1 reputation |
+| Administrator refunds an overdue conflict, even with visible responses | `expired` | Return held five points to the requester; reputation unchanged |
+
+Normal owners cannot accept after expiry. Administrators resolve conflicts
+through the existing acceptance endpoint or the admin-only refund endpoint.
+The selected answer must belong to that request and cannot be the requester's
+own answer. Selection is final; competing awards and refunds cannot both settle
+the same held escrow.
+
+Hidden and pending responses **do not count** when deciding automatic refunds.
+A visible saved response counts even if its creation acknowledgement is still
+unfinished. If a conflicted request later has no visible responses, the scanner
+can expire and refund it. Completed requests are excluded from automatic expiry.
+
+`under_review` is supported by the model and owner acceptance rules. New requests
+start `open`; the expiry worker does not automatically assign `under_review`.
+
+Points writes use the existing `opening_grant`, `hold`, `reward`, and `refund`
+ledger types. For example, with two wallets starting at 100 each:
+
+| Stage | Requester available | Contributor available | Held escrow | Contributor reputation gained |
+| --- | --- | --- | --- | --- |
+| Before request | 100 | 100 | 0 | 0 |
+| After creation | 95 | 100 | 5 | 0 |
+| After acceptance | 95 | 105 | 0 | 1 |
+| After refund instead of acceptance | 100 | 100 | 0 | 0 |
+
+Acceptance transfers the existing hold; it does not charge the requester again.
+Retries do not add another credit or reputation increment.
+
+## Public API
+
+Paths below are relative to Campus, including `API_ROOT` if configured. Use
+`Authorization: Bearer <access-token>` for authenticated requests. Swagger at
+`/docs` provides the complete authentication, profile, user-administration, and
+API-key contracts.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/locations` | List active locations |
+| GET | `/wallet/me` | Read the authenticated user's available points and reputation |
+| GET | `/requests` | List permitted requests with pagination, search, location, status, and `mine` filters |
+| GET | `/requests/{request_id}` | Read a permitted request |
+| POST | `/requests` | Create a request and hold five points |
+| GET | `/requests/{request_id}/responses` | List permitted responses; supports pagination and `mine` |
+| POST | `/requests/{request_id}/responses` | Submit one answer |
+| GET | `/responses/{response_id}` | Read a permitted response |
+| POST | `/requests/{request_id}/responses/{response_id}/accept` | Owner acceptance or administrator conflict resolution |
+| POST | `/requests/{request_id}/refund` | Administrator refund of a conflict |
+| GET | `/operations/{operation_id}` | Read and resume the caller's durable operation |
+
+There is no separate admin conflict-list endpoint. Administrators reuse
+`GET /requests?status=conflicted` with normal visibility rules.
+
+### Create a request
+
+```http
+POST /requests
+Authorization: Bearer <access-token>
+Idempotency-Key: <new-UUID-for-this-submission>
+Content-Type: application/json
+
+{
+  "location_id": 1,
+  "title": "Library study space",
+  "description": "Are any quiet tables available?"
+}
 ```
 
-### Migrations on containers
+Submit a response with `{"answer": "There are tables on the second floor."}`.
+Acceptance and refund actions need no body. They use IDs in the URL and
+server-derived identities and amounts.
 
-Running migrations on Docker container is also possible:
+### Idempotency and asynchronous outcomes
 
-```console
+All four public POST actions above require `Idempotency-Key`. Keys are 1–128
+characters, start with an ASCII letter or digit, and otherwise allow letters,
+digits, `.`, `_`, `:`, and `-`.
+
+Use a new key for each deliberate action. Preserve the same key and content
+when retrying an uncertain request. Changing the caller, action, request,
+response, or submitted content while reusing a key returns 409.
+
+| Response | Meaning |
+| --- | --- |
+| 201 for creation; 200 for acceptance/refund, with `status: completed` | Every participant acknowledged the recorded COMMIT |
+| 202 with `status: processing` | Coordination or decision delivery remains unfinished; do not report payment success |
+| 4xx/5xx business error | Inspect `detail.code`, `detail.message`, and any `detail.operation_id` |
+
+Poll `GET /operations/{operation_id}` until `status` is `completed` or `aborted`.
+Polling returns HTTP 200 for a valid operation; the body determines its outcome.
+An operation is visible only to its recorded owner; other callers receive 404.
+For administrator resolutions, that owner is the initiating administrator, while
+the payload separately records the actual financial recipient.
+
+A confirmed aborted operation stays aborted. Correct its cause and use a new
+key for a fresh attempt. A timeout or 503 is not proof that nothing happened;
+use any returned operation ID or retry the original key to establish the result.
+
+## Two-phase commit
+
+### Which actions participate?
+
+| Operation | Campus preparation | Points preparation |
+| --- | --- | --- |
+| `create_request` | Insert moderated request | Debit available balance, create held escrow and hold ledger entry |
+| `create_response` | Insert moderated response | None; uses the coordinator with Campus as its only participant |
+| `accept_response` | Complete request and record selected response/time | Release escrow, credit contributor, add +1 reputation and reward ledger entry |
+| `expire_request` | Mark request expired | Refund requester, settle escrow, insert refund ledger entry |
+
+Administrator awards reuse `accept_response`; administrator refunds reuse
+`expire_request`. Classifying a request as `conflicted` uses a normal Campus
+transaction because it makes no Points changes. Registration wallet
+initialization is the separate idempotent local-commit flow described above.
+
+### Prepare, decide, and deliver
+
+1. **Persist intake.** Campus commits the operation's UUID, caller, idempotency
+   key, and trusted payload to `distributed_transactions`. Before preparation,
+   the coordinator reserves any new entity IDs durably and registers the
+   required participants.
+2. **Prepare local work.** Each participant validates its inputs and eligibility
+   under locks, performs its business writes, inserts a local journal row, and
+   executes PostgreSQL `PREPARE TRANSACTION` on a dedicated connection. It votes
+   Yes only after preparation is durable. Ordinary ORM sessions do not finish
+   these native transactions.
+3. **Record one decision.** Campus records COMMIT only after all required Yes
+   votes. A failed prepare or unconfirmed prepare reply causes ABORT. The
+   decision is persisted before delivery and cannot be replaced later.
+4. **Deliver the decision.** Campus sends the saved decision to participants,
+   delivering to Points before completing its own participant. Participants
+   verify Campus's recorded decision before applying `COMMIT PREPARED` or
+   `ROLLBACK PREPARED`.
+5. **Finish acknowledgement.** Campus records each acknowledgement and marks
+   the coordinator operation `finished` only after all participants acknowledge.
+   The API exposes the completed business result at that point.
+
+```mermaid
+sequenceDiagram
+    participant C as Campus coordinator
+    participant CD as Campus PostgreSQL
+    participant P as Points API
+    participant PD as Points PostgreSQL
+    C->>CD: Persist operation and identifiers
+    C->>CD: Business writes + PREPARE TRANSACTION
+    C->>P: Authenticated prepare request
+    P->>PD: Business writes + PREPARE TRANSACTION
+    PD-->>P: Durable preparation
+    P-->>C: Yes vote
+    C->>CD: Record immutable COMMIT or ABORT
+    C->>P: Deliver saved decision
+    P->>PD: COMMIT PREPARED or ROLLBACK PREPARED
+    P-->>C: Acknowledge
+    C->>CD: Finish Campus participant
+    C->>CD: Save acknowledgements and finished state
+```
+
+This diagram shows a two-participant action. Response creation uses the same
+coordinator without a Points participant.
+
+### Durable state and duplicate protection
+
+| Record | Location | Purpose |
+| --- | --- | --- |
+| `distributed_transactions` | Campus database | Operation payload, caller, key, entity IDs, immutable decision, progress and error |
+| `transaction_participants` | Campus database | Required services, Yes/No votes, acknowledgements |
+| `participant_transactions` | Each service's database | Local native transaction ID and prepared/committed/aborted journal state |
+| `pg_prepared_xacts` | PostgreSQL system view | Native preparations that survived disconnection or process restart |
+| `escrows`, `points_transactions` | Points database | Held/released/refunded rewards and financial ledger |
+
+Coordinator progress follows:
+
+```text
+preparing -> commit_decided -> finished  (decision: commit)
+preparing -> abort_decided  -> finished  (decision: abort)
+```
+
+Public results translate these records into `processing`, `completed`, or
+`aborted`. The `finished` coordinator state alone does not imply success; inspect
+its decision.
+
+Native transaction IDs have the form
+`campuspoint:<service>:<transaction-UUID-hex>:<payload-hash>`. The hash binds retries
+to the same validated message even before its journal row becomes visible.
+Advisory locks serialize coordination and participant messages per operation.
+Request, response, wallet, and escrow row locks protect eligibility and accounting
+across different operation IDs.
+
+Unique constraints enforce one response per contributor/request, one escrow per
+request, and one opening grant per user. Partial unique indexes prevent multiple
+reward or refund entries per escrow and duplicate active/committed expiry jobs.
+Escrow status checks prevent a released or refunded hold from being settled again.
+Abort journal records also reject delayed prepare messages after an abort.
+
+### Visibility and availability
+
+Prepared business writes are not visible to normal readers, but retain database
+locks. List/detail reads additionally require a finished committed creation
+operation before publishing a new request or response.
+
+Decision delivery can commit one participant before the other. Independent
+reads may temporarily observe that service's committed state while the operation
+is still processing. Clients must wait for coordinator completion before claiming
+that an award or refund finished.
+
+A recorded COMMIT must eventually finish as COMMIT, even after a deadline passes
+or an acknowledgement is lost. During an outage, a prepared participant can
+remain blocked until the coordinator and communication recover. A timeout never
+authorizes an independent participant to reverse the decision.
+
+## Recovery loops and expiry scanning
+
+Workers start with each FastAPI application's lifespan, run an initial pass,
+and continue while that process is alive. Shutdown cancels and awaits them.
+They are application background tasks, not external cron jobs.
+
+| Worker | Service | Delay after each pass | Work |
+| --- | --- | --- | --- |
+| Coordinator recovery | Campus | 5 seconds | Resume up to 100 oldest unfinished operations from durable state |
+| Participant recovery | Points | 5 seconds | Find native preparations and unfinished journal entries; obtain and apply Campus decisions |
+| Request expiry scan | Campus | `REQUEST_EXPIRY_SCAN_INTERVAL_SECONDS`, default 60 | Inspect up to 100 eligible overdue requests; classify conflicts or enqueue refund operations |
+
+The delay begins after a pass completes, so a long pass extends the effective
+interval. Expiry and coordinator recovery are separate workers. Request posting
+and normal owner acceptance enforce their deadlines even before a scan runs.
+
+### How transaction recovery proceeds
+
+- **Campus crashed after intake or preparation:** reconstruct the original
+  payload and reserved IDs, repeat preparation idempotently, and finish the
+  decision protocol.
+- **A prepare succeeded but its reply was lost:** the coordinator can record
+  ABORT; delivery rolls back any preparation that actually succeeded.
+- **A decision exists but delivery or acknowledgement failed:** replay that same
+  decision until each participant acknowledges. No new payout is created.
+- **Points cannot reach Campus, or Campus has no decision yet:** keep waiting.
+  Points does not infer ABORT from a timeout, an unavailable coordinator, or a
+  missing decision.
+- **A process crashed after `COMMIT PREPARED` but before updating its journal:**
+  the now-visible journal row proves its business transaction committed.
+  Recovery marks that journal committed without repeating the business writes.
+
+Authenticated `GET /operations/{operation_id}` also advances unfinished
+coordination; browser polling is an additional recovery trigger. Recovery
+therefore continues without the original browser request, and prepared state
+survives API restarts through PostgreSQL.
+
+### How expiry scanning proceeds
+
+The database clock determines whether a request is overdue. Campus selects due,
+unaccepted requests with `FOR UPDATE SKIP LOCKED`, so another worker or a
+prepared action can hold a request without blocking the entire scan.
+
+With visible responses, Campus records `conflicted` in a local transaction and
+keeps the escrow held. Without visible responses, it saves an `expire_request`
+operation, releases intake locks, and runs normal refund 2PC. The Campus
+participant rechecks expiry and visible-response absence under lock; Points
+rechecks escrow ownership and its held status.
+
+Existing conflicts are reconsidered if their visible responses disappear.
+Legacy `expired` rows without a completed refund are also eligible for repair.
+Conflicts that still have visible responses do not consume the scan batch.
+Already accepted requests and active/committed expiry operations are excluded.
+After a fully aborted automatic refund, a later scan may create a fresh attempt;
+unfinished operations remain the recovery worker's responsibility.
+
+## Database inspection
+
+Open Campus PostgreSQL:
+
+```sh
+docker compose exec campus-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+Run SQL at the PostgreSQL prompt:
+
+```sql
+SELECT id, requester_id, title, status, moderation_status,
+       expires_at, accepted_response_id
+FROM requests
+ORDER BY id DESC;
+
+SELECT id, request_id, contributor_id, moderation_status, answer
+FROM responses
+ORDER BY id DESC;
+
+SELECT id, operation, owner_id, request_id, response_id,
+       state, decision, error_code
+FROM distributed_transactions
+WHERE state <> 'finished'
+ORDER BY created_at;
+
+SELECT transaction_id, participant, vote, acknowledged
+FROM transaction_participants
+ORDER BY transaction_id, participant;
+```
+
+Open Points PostgreSQL separately:
+
+```sh
+docker compose exec points-db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+```sql
+SELECT user_id, available_points, reputation FROM wallets ORDER BY user_id;
+
+SELECT request_id, requester_id, amount, status,
+       recipient_id, awarded_response_id
+FROM escrows
+ORDER BY request_id;
+
+SELECT user_id, type, amount, distributed_transaction_id, created_at
+FROM points_transactions
+ORDER BY created_at DESC;
+```
+
+In either database, inspect native preparations and local journals:
+
+```sql
+SHOW max_prepared_transactions;
+
+SELECT gid, prepared, owner, database
+FROM pg_prepared_xacts
+WHERE database = current_database();
+
+SELECT transaction_id, operation, state, updated_at
+FROM participant_transactions
+ORDER BY updated_at DESC;
+```
+
+Exit `psql` with `\q`. For stuck operations, inspect the saved decision and
+service logs, then restore database/service connectivity so recovery can finish.
+Do not manually roll back a prepared transaction just because it is old: its
+coordinator may already have committed the global decision.
+
+## Migrations and checks
+
+### Schema migrations
+
+Compose runs migrations automatically on API startup. To apply them explicitly
+to running services:
+
+```sh
 docker compose exec campus-api alembic upgrade head
 docker compose exec points-api alembic -c alembic-points.ini upgrade head
 ```
 
-### Testing on containers
+Campus and Points have separate migration histories. When managing PostgreSQL
+outside Compose, enable prepared transactions on both databases before starting
+2PC work; a zero `max_prepared_transactions` prevents preparation and changing
+that setting requires a database restart.
 
-Running tests on Docker container is also possible:
+### Validation and service tests
 
-```console
-docker compose exec campus-api python -m pytest
-docker compose exec points-api python -m pytest tests_points -o addopts='' -q
+For local Python tooling, install the locked dependencies, including development
+tools:
+
+```sh
+uv sync --locked
+uv run python -m pytest tests_requests tests_points -o addopts='' -q
 ```
 
-## Planned Functionality and Known Bugs
+These suites cover validation, moderation, authorization boundaries, schemas,
+and isolated service behavior. By default, request intake tests use temporary
+SQLite and Points tests mock their database. They do not prove native 2PC.
 
-See the [TODO.md](TODO.md) file for plans and known issues.
+### Real PostgreSQL workflow tests
 
-## Testing
+Create **two disposable PostgreSQL databases**, with prepared transactions
+enabled, and supply their URLs explicitly. For example, assuming a dedicated
+test server on port 5543 with the following databases already created:
 
-This project has a test suite for Integration and Unit tests. We use
-[pytest][pytest] for this.
-
-Currently you need a Postgresql database running for this to work, however
-SQLite support is planned to be re-added. You can easily set up a Postgresql
-database using Docker.
-
-Before running the tests, you need to create a dedicated test database, in is
-assumed that the server, username and password are the same as for the main
-database.
-
-Edit the setting in `.env` to point to the test database:
-
-```ini
-# Database name to use for testing. This must already exist.
-TEST_DB_NAME=api-template-test
+```sh
+REQUESTS_TEST_DATABASE_URL='postgresql+asyncpg://test_user:test_password@127.0.0.1:5543/campus_test' \
+POINTS_TEST_DATABASE_URL='postgresql+asyncpg://test_user:test_password@127.0.0.1:5543/points_test' \
+uv run python -m pytest tests_workflow -o addopts='' -q
 ```
 
-You can then migrate this empty database by running:
+**Workflow fixtures truncate application tables and roll back test preparations.
+Never point these variables at development/demo data or production databases.**
+The URLs must identify different databases. Without both variables, workflow
+fixtures skip their database-dependent tests.
 
-```console
-$ api-admin test setup
-Migrating the test database ... Done!
+Workflow coverage includes creation, response visibility, wallet conservation,
+reward/reputation and refund accounting, permissions, competing settlements,
+idempotent retries, local rollback, lost prepare/commit acknowledgements, and
+crash recovery. These tests exercise native prepared transactions through both
+services' ASGI routes.
+
+The original `tests/` suite uses `TEST_DB_NAME` and drops/recreates its schema.
+Configure that database separately before running it; do not use the application
+database for this suite either.
+
+Useful code and documentation checks:
+
+```sh
+uv run python -m ruff check app tests_requests tests_points tests_workflow
+uv run python -m ruff format --check app tests_requests tests_points tests_workflow
+uv run python -m pymarkdown scan README.md
 ```
 
-Tests can then be run from the checked out code with:
+## Troubleshooting
 
-```console
-$ pytest
-```
+| Symptom | Check |
+| --- | --- |
+| Campus exits with the documentation warning | Add `I_READ_THE_DAMN_DOCS=true` to `.env` and recreate the API container |
+| Registration returns 503 | Points availability, shared service token, and Points database initialization |
+| Location dropdown is empty or creation reports `invalid_location` | Import the CSV and confirm the selected location is active |
+| Request creation reports `insufficient_points` | Available wallet balance must cover the fixed five-point hold |
+| A new request or response is hidden | Check `MODERATION_BLOCKED_WORDS`; blocked matches intentionally return `hidden` |
+| Moderation remains pending | Inspect the Campus moderation error log; pending means the check failed |
+| Operation remains processing | Both API/database health checks, recorded decision, participant acknowledgements, recovery logs, and native preparations |
+| Preparation fails with service unavailable | Confirm `max_prepared_transactions` is nonzero in both databases and the service token matches |
+| Browser reports CORS errors or email links use the wrong host | Set `CORS_ORIGINS` and `FRONTEND_URL`, then recreate the affected API service |
+| Database credentials changed but the database rejects them | Existing PostgreSQL volumes retain their initialized users/passwords; changing `.env` alone does not alter database roles |
+| A request expired while Campus was stopped | Startup scanning processes it; allow for scan batches, service availability, and recovery time |
 
-It is possible to run either the Unit or Integration tests separately using
-`pytest -m unit` or `pytest -m integration`
+## Code and detailed documentation
 
-Full tests will be run automatically by **GitHub Actions** on every new commit
-pushed up to the remote repository. Code Coverage is also checked and noted
-after each test suite is run.
+| Path | Responsibility |
+| --- | --- |
+| `app/resources/` | Campus HTTP endpoints and authentication dependencies |
+| `app/managers/coordinator.py` | Durable coordination, decisions, acknowledgements, and Campus recovery |
+| `app/managers/*_participant.py` | Campus native preparations and guarded request/response changes |
+| `app/managers/expiration.py` | Due-request classification and refund intake |
+| `app/managers/conflict_resolution.py` | Administrator validation and refund operations |
+| `app/managers/moderation.py` | Configurable blocked-word checks |
+| `app/transactions/` | Native PostgreSQL prepare/finish, GIDs, journals, schemas, and worker lifecycle |
+| `app/points/` | Points API, financial participants, wallet initialization, and participant recovery |
+| `app/migrations/`, `app/points/migrations/` | Separate Alembic migrations |
+| `tests_requests/`, `tests_points/`, `tests_workflow/` | Validation/service tests and real database workflows |
 
-## Code Quality
+Detailed contracts and setup notes:
 
-`To be written`
+- [Location import](docs/development/locations.md)
+- [Wallet initialization and profile reads](docs/development/wallets.md)
+- [Request creation and escrow](docs/development/requests.md)
+- [Response API](docs/development/responses.md)
+- [Acceptance, rewards, and reputation](docs/development/acceptance.md)
+- [Automatic expiry, refunds, and conflicts](docs/development/expiration.md)
+- [Administrator conflict resolution](docs/development/conflict-resolution.md)
 
-## Who is Using this Template?
-
-Meh, at the moment probably no-one except me 😆. If you do use this in one of
-your own projects, drop me a message and I'll add your profile and project links
-here 😃.
-
-## Contributing
-
-See [Contributing][contrib] for details on how to contribute to this project.
-
-## GitHub Discussions
-
-I have enabled [Discussions][discussions] on this repository, so if you have any
-questions, suggestions or just want to chat about this template, please feel
-free to start a discussion.
-
-[doc]: https://api-template.seapagan.net
-[contrib]: https://api-template.seapagan.net/contributing/
-[breaking]: https://api-template.seapagan.net/important/
-[install]: https://api-template.seapagan.net/usage/installation/
-[latest-release]: https://github.com/seapagan/fastapi-template/releases/latest
-[discussions]: https://github.com/seapagan/fastapi-template/discussions
-[legacy-branch]: https://github.com/seapagan/fastapi-template/tree/0.4.2
-[sponsor]: https://github.com/sponsors/seapagan
-[coffee]: https://www.buymeacoffee.com/seapagan
-[alembic]: https://github.com/sqlalchemy/alembic
-[typer]: https://typer.tiangolo.com/
-[fastapi]: https://fastapi.tiangolo.com/
-[pytest]: https://docs.pytest.org
-[tut-basic]: https://fastapi.tiangolo.com/tutorial/
-[tut-advanced]: https://fastapi.tiangolo.com/advanced/
+The authentication, account tooling, and optional administration infrastructure
+originate from [seapagan/fastapi-template](https://github.com/seapagan/fastapi-template).
+See [LICENSE.txt](LICENSE.txt) for licensing.
