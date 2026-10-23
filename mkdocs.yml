@@ -1,7 +1,7 @@
 site_name: CampusPoint Backend
 site_description: Campus requests, responses, escrowed rewards, two-phase commit, and recovery.
-repo_url: https://github.com/aliahhmad/rit_csci_652_dist_project
-repo_name: aliahhmad/rit_csci_652_dist_project
+repo_url: https://github.com/aliahhmad/campus_point_rit_backend
+repo_name: aliahhmad/campus_point_rit_backend
 copyright: CampusPoint — includes MIT-licensed FastAPI Template components
 
 theme:

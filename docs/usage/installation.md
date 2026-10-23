@@ -12,7 +12,7 @@ import, and startup. A frontend checkout is separate from these backend services
   outside Compose. Compose supplies PostgreSQL 18.1 with the required setting.
 
 The backend repository is
-[aliahhmad/rit_csci_652_dist_project](https://github.com/aliahhmad/rit_csci_652_dist_project).
+[aliahhmad/campus_point_rit_backend](https://github.com/aliahhmad/campus_point_rit_backend).
 Run backend commands from the directory containing `pyproject.toml` and
 `docker-compose.yml`.
 

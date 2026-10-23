@@ -15,7 +15,7 @@ output, and the documentation site. These sources are separate:
 ```env
 API_TITLE=CampusPoint
 API_DESCRIPTION=Campus requests, responses, escrowed rewards, and distributed settlement.
-REPOSITORY=https://github.com/aliahhmad/rit_csci_652_dist_project
+REPOSITORY=https://github.com/aliahhmad/campus_point_rit_backend
 MAIL_FROM_NAME=CampusPoint RIT
 FRONTEND_URL=http://localhost:5173
 ```
