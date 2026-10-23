@@ -14,7 +14,7 @@ async def expire_unanswered_request(
     _transaction_id: UUID,
     payload: ExpiryPreparation,
 ) -> None:
-    """Recheck the deadline and absence of answers under the parent lock."""
+    """Recheck the deadline and absence of visible answers under a lock."""
     parent = await conn.fetchrow(
         "SELECT *,expires_at <= CURRENT_TIMESTAMP AS overdue "
         "FROM requests WHERE id=$1 FOR UPDATE",
@@ -25,7 +25,8 @@ async def expire_unanswered_request(
     if parent["requester_id"] != payload.owner_id:
         raise protocol_error(code="request_owner_required", status_code=403)
     if (
-        parent["status"] not in {"open", "under_review", "expired"}
+        parent["status"]
+        not in {"open", "under_review", "expired", "conflicted"}
         or parent["accepted_response_id"] is not None
         or parent["accepted_at"] is not None
     ):
@@ -33,7 +34,8 @@ async def expire_unanswered_request(
     if not parent["overdue"]:
         raise protocol_error(code="request_not_expired")
     if await conn.fetchval(
-        "SELECT EXISTS (SELECT 1 FROM responses WHERE request_id=$1)",
+        "SELECT EXISTS (SELECT 1 FROM responses WHERE request_id=$1 "
+        "AND moderation_status='visible')",
         payload.request_id,
     ):
         raise protocol_error(code="request_has_responses")

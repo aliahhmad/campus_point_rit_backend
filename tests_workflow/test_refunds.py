@@ -69,14 +69,14 @@ async def expiry_id(workflow: Workflow) -> UUID:
 @pytest.mark.parametrize(
     "moderation", ["visible", "hidden", "pending", "unconfirmed"]
 )
-@pytest.mark.parametrize("previous_status", ["open", "expired"])
-async def test_answered_expiry_becomes_conflicted(
+@pytest.mark.parametrize("previous_status", ["open", "expired", "conflicted"])
+async def test_only_visible_answers_block_refunds(
     workflow: Workflow,
     monkeypatch: pytest.MonkeyPatch,
     moderation: str,
     previous_status: str,
 ) -> None:
-    """Every saved answer prevents refund, even if hidden or unconfirmed."""
+    """Only visible answers keep rewards held when the request expires."""
     request_id = await seed_request(workflow, overdue=False)
     authenticate(workflow, 2)
     answered = await workflow.client.post(
@@ -105,9 +105,16 @@ async def test_answered_expiry_becomes_conflicted(
     async def no_points(*_args, **_kwargs) -> None:  # noqa: ANN002, ANN003
         pytest.fail("Classifying a conflict must not contact Points")
 
-    monkeypatch.setattr(coordinator, "call_points", no_points)
-    assert await expiration.expire_requests() == 1
+    visible = moderation in {"visible", "unconfirmed"}
+    if visible:
+        monkeypatch.setattr(coordinator, "call_points", no_points)
+    assert await expiration.expire_requests() == int(
+        not (visible and previous_status == "conflicted")
+    )
     assert await expiration.expire_requests() == 0
+    if not visible:
+        await assert_refund(workflow, request_id, refunded=True)
+        return
     listing = await workflow.client.get(ROOT + "/requests?status=conflicted")
     assert listing.status_code == status.HTTP_200_OK
     assert listing.json()["items"][0]["status"] == "conflicted"
@@ -130,6 +137,63 @@ async def test_answered_expiry_becomes_conflicted(
             )
             == 0
         )
+
+
+async def test_hiding_last_visible_response_refunds_existing_conflict(
+    workflow: Workflow,
+) -> None:
+    """Mixed answers conflict until the last visible one becomes hidden."""
+    request_id = await seed_request(workflow, overdue=False)
+    authenticate(workflow, 2)
+    visible = await workflow.client.post(
+        ROOT + f"/requests/{request_id}/responses",
+        json={"answer": "Second floor."},
+        headers={"Idempotency-Key": "visible-answer"},
+    )
+    assert visible.status_code == status.HTTP_201_CREATED, visible.text
+    async with connection(workflow.campus_url) as conn:
+        await conn.execute(
+            "INSERT INTO users "
+            "(id,email,password,first_name,last_name,banned,verified) VALUES "
+            "(3,'third@example.com','unused','Third','User',false,true)"
+        )
+    authenticate(workflow, 3)
+    hidden = await workflow.client.post(
+        ROOT + f"/requests/{request_id}/responses",
+        json={"answer": "A shit answer."},
+        headers={"Idempotency-Key": "hidden-answer"},
+    )
+    assert hidden.status_code == status.HTTP_201_CREATED, hidden.text
+    assert hidden.json()["response"]["moderation_status"] == "hidden"
+    async with connection(workflow.campus_url) as conn:
+        await conn.execute(
+            "UPDATE requests SET expires_at=now()-interval '1 hour' "
+            "WHERE id=$1",
+            request_id,
+        )
+    assert await expiration.expire_requests() == 1
+    assert await expiration.expire_requests() == 0
+    async with connection(workflow.campus_url) as conn:
+        assert (
+            await conn.fetchval(
+                "SELECT status FROM requests WHERE id=$1", request_id
+            )
+            == "conflicted"
+        )
+        await conn.execute(
+            "UPDATE responses SET moderation_status='hidden' WHERE id=$1",
+            visible.json()["response"]["id"],
+        )
+    async with connection(workflow.points_url) as conn:
+        assert (
+            await conn.fetchval(
+                "SELECT status FROM escrows WHERE request_id=$1", request_id
+            )
+            == "held"
+        )
+    assert await expiration.expire_requests() == 1
+    assert await expiration.expire_requests() == 0
+    await assert_refund(workflow, request_id, refunded=True)
 
 
 async def test_refund_journals_polling_and_idempotency(
@@ -295,24 +359,32 @@ async def test_refund_commit_journal_gap(
     await assert_refund(workflow, request_id, refunded=True)
 
 
-async def test_refund_rechecks_answers_before_prepare(
-    workflow: Workflow, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("moderation", ["visible", "hidden", "pending"])
+async def test_refund_rechecks_visible_answers_before_prepare(
+    workflow: Workflow, monkeypatch: pytest.MonkeyPatch, moderation: str
 ) -> None:
-    """An answer appearing after intake aborts the refund and flags conflict."""
+    """A late visible answer blocks refunds; hidden or pending ones do not."""
     request_id = await seed_request(workflow)
     original = coordinator.prepare_expiration
 
     async def add_answer(*args, **kwargs) -> None:  # noqa: ANN002, ANN003
         async with connection(workflow.campus_url) as conn:
             await conn.execute(
-                "INSERT INTO responses (request_id,contributor_id,answer) "
-                "VALUES ($1,2,'Late stored answer')",
+                "INSERT INTO responses "
+                "(request_id,contributor_id,answer,moderation_status) "
+                "VALUES ($1,2,'Late stored answer',$2)",
                 request_id,
+                moderation,
             )
         await original(*args, **kwargs)
 
     monkeypatch.setattr(coordinator, "prepare_expiration", add_answer)
-    assert await expiration.expire_requests() == 0
+    visible = moderation == "visible"
+    assert await expiration.expire_requests() == int(not visible)
+    if not visible:
+        await assert_refund(workflow, request_id, refunded=True)
+        assert await expiration.expire_requests() == 0
+        return
     await assert_refund(workflow, request_id, refunded=False)
     monkeypatch.setattr(coordinator, "prepare_expiration", original)
     assert await expiration.expire_requests() == 1

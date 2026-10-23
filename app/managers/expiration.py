@@ -1,4 +1,4 @@
-"""Classify overdue requests and coordinate refunds for unanswered ones."""
+"""Classify overdue requests by visible answers and coordinate refunds."""
 
 import asyncio
 import json
@@ -14,15 +14,19 @@ logger = logging.getLogger(__name__)
 
 
 async def queue_expirations() -> tuple[list[UUID], int]:
-    """Lock due requests, flag answered ones, and persist refund operations."""
+    """Count visible answers, revisit conflicts, and persist refund jobs."""
     operations = []
     conflicted = 0
     async with connection(get_database_url()) as conn, conn.transaction():
         rows = await conn.fetch(
             "SELECT r.id,r.requester_id,EXISTS ("
-            "SELECT 1 FROM responses a WHERE a.request_id=r.id) AS answered "
+            "SELECT 1 FROM responses a WHERE a.request_id=r.id "
+            "AND a.moderation_status='visible') AS answered "
             "FROM requests r "
-            "WHERE r.status IN ('open','under_review','expired') "
+            "WHERE r.status IN ('open','under_review','expired','conflicted') "
+            "AND (r.status != 'conflicted' OR NOT EXISTS ("
+            "SELECT 1 FROM responses a WHERE a.request_id=r.id "
+            "AND a.moderation_status='visible')) "
             "AND r.expires_at <= CURRENT_TIMESTAMP "
             "AND r.accepted_response_id IS NULL AND r.accepted_at IS NULL "
             "AND NOT EXISTS (SELECT 1 FROM distributed_transactions d "

@@ -5,21 +5,27 @@ The database clock determines whether `expires_at <= CURRENT_TIMESTAMP`.
 
 | Request at its deadline | Result | Points |
 | --- | --- | --- |
-| No saved responses and no accepted answer | `expired` | Return its held five points to the requester through 2PC |
-| One or more saved responses, with no accepted answer | `conflicted` | Keep the reward held for later resolution |
+| No visible responses and no accepted answer | `expired` | Return its held five points to the requester through 2PC |
+| One or more visible responses, with no accepted answer | `conflicted` | Keep the reward held for later resolution |
 | Completed or already accepted | Unchanged | No refund |
 
-Any saved response counts, including hidden, pending-moderation, and locally
-committed responses whose creation acknowledgement is unfinished. A response
+Only responses with `moderation_status = visible` count. Hidden and
+pending-moderation responses do not block expiry or refunds. A saved visible
+response still counts if its creation acknowledgement is unfinished. A response
 still in a prepared transaction holds a lock on the parent; the scanner skips
 that request until a later pass. New responses and acceptance remain forbidden
 after the deadline, even before the scanner runs. Resolving conflicted requests
 is outside this flow; it does not automatically choose or pay a contributor.
 
 The scanner also revisits requests already marked `expired` by the older
-status-only implementation. Answered ones become `conflicted`; unanswered ones
-receive their existing held reward back. It never creates a refund without a
-matching held escrow or refunds completed, released, or already-refunded holds.
+status-only implementation. Those with visible responses become `conflicted`;
+those without visible responses receive their existing held reward back.
+Existing `conflicted` requests are reconsidered too: if their last visible
+response becomes hidden or pending, expiry and refund can proceed on the next
+scan. Conflicts that still have visible responses are skipped without using up
+the scan batch, so they cannot block other overdue requests. It never creates a
+refund without a matching held escrow or refunds completed, released, or
+already-refunded holds.
 Reputation stays unchanged during refunds and conflict classification.
 
 ## Schedule
@@ -38,16 +44,16 @@ stopped are picked up after startup.
 
 ## Transactions and recovery
 
-For requests with responses, Campus changes the status to `conflicted` in one
+For requests with visible responses, Campus changes the status to `conflicted` in one
 ordinary local transaction. Points is not contacted and the escrow stays held.
 
-For unanswered requests:
+For requests without visible responses:
 
 1. Campus locks a due request with `FOR UPDATE SKIP LOCKED` and persists an
    `expire_request` coordinator operation with server-derived owner and request
    IDs. It releases the intake lock before preparing native transactions.
 2. The Campus participant locks the parent and rechecks the deadline, status,
-   owner, acceptance fields, and absence of **all** saved responses. It prepares
+   owner, acceptance fields, and absence of **visible** responses. It prepares
    the status change to `expired`.
 3. Points locks the escrow and requester wallet. It verifies the escrow belongs
    to the requester and is still `held`, credits the escrow amount, marks it

@@ -60,6 +60,8 @@ async def seed_request(
         ("under_review", "visible", False, "under_review"),
         ("completed", "visible", True, "completed"),
         ("expired", "visible", True, "expired"),
+        ("conflicted", "visible", True, "expired"),
+        ("conflicted", "visible", False, "conflicted"),
     ],
 )
 async def test_expire_only_overdue_active_requests(
