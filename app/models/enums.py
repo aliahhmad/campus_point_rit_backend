@@ -18,6 +18,7 @@ class RequestStatus(Enum):
     under_review = "under_review"
     completed = "completed"
     expired = "expired"
+    conflicted = "conflicted"
 
 
 class ModerationStatus(Enum):

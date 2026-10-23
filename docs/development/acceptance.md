@@ -76,7 +76,8 @@ Request creation, request lists, and request detail responses now include
 The request must be confirmed, visible, unexpired, and either `open` or
 `under_review`, with no previously accepted response. The selected answer must
 belong to that request, have a finished committed creation operation, and be
-`visible`. Hidden or pending answers cannot be selected. Contributors cannot
+`visible`. Hidden or pending answers cannot be selected. Expired and conflicted
+requests cannot accept a new selection. Contributors cannot
 receive their own request's reward. The same rules are checked again during
 Campus preparation under row locks.
 

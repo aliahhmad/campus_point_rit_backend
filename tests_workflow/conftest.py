@@ -123,6 +123,7 @@ async def workflow(
     for module in (
         "app.managers.coordinator",
         "app.managers.expiration",
+        "app.managers.expiration_participant",
         "app.managers.acceptance_participant",
         "app.managers.request_participant",
         "app.managers.response_participant",
@@ -132,6 +133,7 @@ async def workflow(
     for module in (
         "app.points.managers.campus_request",
         "app.points.managers.acceptance",
+        "app.points.managers.refund",
         "app.points.managers.recovery",
     ):
         monkeypatch.setattr(module + ".get_database_url", lambda: points_url)

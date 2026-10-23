@@ -33,3 +33,13 @@ class AcceptancePreparation(BaseModel):
     request_id: int = Field(gt=0, le=2_147_483_647, strict=True)
     response_id: int = Field(gt=0, le=2_147_483_647, strict=True)
     contributor_id: int = Field(gt=0, le=2_147_483_647, strict=True)
+
+
+class ExpiryPreparation(BaseModel):
+    """Identify an overdue unanswered request and its refund recipient."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    operation: Literal["expire_request"] = "expire_request"
+    owner_id: int = Field(gt=0, le=2_147_483_647, strict=True)
+    request_id: int = Field(gt=0, le=2_147_483_647, strict=True)

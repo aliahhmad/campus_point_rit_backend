@@ -7,8 +7,13 @@ from fastapi import APIRouter, Depends
 
 from app.points.managers.acceptance import prepare_acceptance
 from app.points.managers.campus_request import finish_request, prepare_request
+from app.points.managers.refund import prepare_refund
 from app.points.security import require_service_token
-from app.transactions.schemas import AcceptancePreparation, RequestPreparation
+from app.transactions.schemas import (
+    AcceptancePreparation,
+    ExpiryPreparation,
+    RequestPreparation,
+)
 
 router = APIRouter(
     prefix="/internal/transactions",
@@ -32,6 +37,15 @@ async def prepare_points_acceptance(
 ) -> dict[str, str]:
     """Prepare escrow release, recipient credit, and reward ledger together."""
     await prepare_acceptance(transaction_id, payload)
+    return {"result": "yes"}
+
+
+@router.post("/{transaction_id}/prepare-refund")
+async def prepare_points_refund(
+    transaction_id: UUID, payload: ExpiryPreparation
+) -> dict[str, str]:
+    """Prepare owner credit, escrow settlement, and the refund ledger."""
+    await prepare_refund(transaction_id, payload)
     return {"result": "yes"}
 
 

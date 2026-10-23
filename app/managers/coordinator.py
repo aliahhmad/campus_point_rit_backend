@@ -12,6 +12,7 @@ from fastapi import HTTPException, status
 from app.config.settings import get_settings
 from app.database.db import get_database_url
 from app.managers.acceptance_participant import prepare_acceptance
+from app.managers.expiration_participant import prepare_expiration
 from app.managers.request_participant import finish_request, prepare_request
 from app.managers.response_participant import prepare_response
 from app.schemas.response.acceptance import ResponseAcceptanceResult
@@ -23,10 +24,12 @@ from app.schemas.response.campus_response import (
     CampusResponseCreateResult,
     CampusResponseRead,
 )
+from app.schemas.response.expiration import RequestExpiryResult
 from app.schemas.response.operation import OperationResult
 from app.transactions.postgres import connection, lock_key, protocol_error
 from app.transactions.schemas import (
     AcceptancePreparation,
+    ExpiryPreparation,
     RequestPreparation,
     ResponsePreparation,
 )
@@ -34,6 +37,7 @@ from app.transactions.schemas import (
 logger = logging.getLogger(__name__)
 FAILURES = (
     asyncpg.PostgresError,
+    asyncpg.InterfaceError,
     httpx.HTTPError,
     OSError,
     TimeoutError,
@@ -45,7 +49,7 @@ def operation_participants(operation: str) -> tuple[str, ...]:
     """Use both services for requests and rewards; Campus alone for answers."""
     if operation == "create_response":
         return ("campus",)
-    if operation in {"create_request", "accept_response"}:
+    if operation in {"create_request", "accept_response", "expire_request"}:
         return ("campus", "points")
     raise protocol_error(code="unsupported_operation", status_code=503)
 
@@ -53,7 +57,10 @@ def operation_participants(operation: str) -> tuple[str, ...]:
 async def call_points(
     transaction_id: UUID,
     action: str,
-    payload: RequestPreparation | AcceptancePreparation | None = None,
+    payload: RequestPreparation
+    | AcceptancePreparation
+    | ExpiryPreparation
+    | None = None,
 ) -> None:
     """Use authenticated HTTP to contact the independent Points Service."""
     settings = get_settings()
@@ -63,12 +70,12 @@ async def call_points(
     async with httpx.AsyncClient(
         base_url=settings.points_api_url.rstrip("/"), timeout=7
     ) as client:
-        endpoint_action = (
-            "prepare-acceptance"
-            if action == "prepare"
-            and isinstance(payload, AcceptancePreparation)
-            else action
-        )
+        endpoint_action = action
+        if action == "prepare":
+            if isinstance(payload, AcceptancePreparation):
+                endpoint_action = "prepare-acceptance"
+            elif isinstance(payload, ExpiryPreparation):
+                endpoint_action = "prepare-refund"
         response = await client.post(
             f"/internal/transactions/{transaction_id}/{endpoint_action}",
             headers={"X-Service-Token": token},
@@ -95,6 +102,7 @@ async def call_points(
                 "escrow_mismatch",
                 "escrow_already_settled",
                 "recipient_wallet_missing",
+                "requester_wallet_missing",
             }:
                 code = "service_unavailable"
             raise protocol_error(code, response.status_code)
@@ -161,6 +169,30 @@ async def acceptance_operation_response(
     return result
 
 
+async def expiry_operation_response(
+    conn: asyncpg.Connection, transaction_id: UUID, operation: asyncpg.Record
+) -> RequestExpiryResult:
+    """Confirm a refund only after both participants acknowledge."""
+    expiry = RequestExpiryResult(
+        operation_id=transaction_id,
+        created_at=operation["created_at"],
+        error_code=operation["error_code"],
+    )
+    if operation["state"] != "finished":
+        return expiry
+    if operation["decision"] == "abort":
+        expiry.status = "aborted"
+        return expiry
+    row = await conn.fetchrow(
+        "SELECT * FROM requests WHERE id=$1", operation["request_id"]
+    )
+    if row is None or row["status"] != "expired":
+        raise protocol_error(code="service_unavailable", status_code=503)
+    expiry.status = "completed"
+    expiry.request = CampusRequestResponse(**dict(row))
+    return expiry
+
+
 async def operation_response(
     conn: asyncpg.Connection, transaction_id: UUID
 ) -> OperationResult:
@@ -170,6 +202,8 @@ async def operation_response(
     )
     if operation is None:
         raise HTTPException(404, "Operation not found")
+    if operation["operation"] == "expire_request":
+        return await expiry_operation_response(conn, transaction_id, operation)
     if operation["operation"] == "accept_response":
         return await acceptance_operation_response(
             conn, transaction_id, operation
@@ -212,13 +246,22 @@ async def operation_response(
 
 async def preparation_payload(
     conn: asyncpg.Connection, transaction_id: UUID, operation: asyncpg.Record
-) -> RequestPreparation | ResponsePreparation | AcceptancePreparation:
+) -> (
+    RequestPreparation
+    | ResponsePreparation
+    | AcceptancePreparation
+    | ExpiryPreparation
+):
     """Reserve the entity ID once and reconstruct the original submission."""
     details = (
         json.loads(operation["payload"])
         if isinstance(operation["payload"], str)
         else operation["payload"]
     )
+    if operation["operation"] == "expire_request":
+        return ExpiryPreparation(
+            request_id=operation["request_id"], owner_id=operation["owner_id"]
+        )
     if operation["operation"] == "accept_response":
         return AcceptancePreparation(**details, owner_id=operation["owner_id"])
     if operation["operation"] == "create_response":
@@ -257,7 +300,9 @@ async def prepare_and_decide(
     for participant in operation_participants(operation["operation"]):
         try:
             if participant == "campus":
-                if isinstance(payload, AcceptancePreparation):
+                if isinstance(payload, ExpiryPreparation):
+                    await prepare_expiration(transaction_id, payload)
+                elif isinstance(payload, AcceptancePreparation):
                     await prepare_acceptance(transaction_id, payload)
                 elif isinstance(payload, ResponsePreparation):
                     await prepare_response(transaction_id, payload)
@@ -265,7 +310,12 @@ async def prepare_and_decide(
                     await prepare_request(transaction_id, payload)
             else:
                 if not isinstance(
-                    payload, (RequestPreparation, AcceptancePreparation)
+                    payload,
+                    (
+                        RequestPreparation,
+                        AcceptancePreparation,
+                        ExpiryPreparation,
+                    ),
                 ):
                     raise protocol_error(
                         code="unsupported_operation", status_code=503

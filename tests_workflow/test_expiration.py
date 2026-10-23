@@ -24,18 +24,29 @@ async def seed_request(
     *,
     overdue: bool = True,
 ) -> int:
-    """Insert an eligible legacy row independently of creation operations."""
+    """Create a funded request and set its clock and moderation for a scan."""
+    created = await workflow.client.post(
+        ROOT + "/requests",
+        json={
+            "location_id": 1,
+            "title": "Expiry test",
+            "description": "A request",
+        },
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    request_id = created.json()["request"]["id"]
     async with connection(workflow.campus_url) as conn:
-        return await conn.fetchval(
-            "INSERT INTO requests (requester_id,location_id,title,"
-            "description,status,moderation_status,created_at,expires_at) "
-            "VALUES (1,1,'Expiry test','A request',$1,$2,"
-            "CURRENT_TIMESTAMP-interval '2 hours',"
-            "CURRENT_TIMESTAMP+$3::interval) RETURNING id",
+        await conn.execute(
+            "UPDATE requests SET status=$1,moderation_status=$2,"
+            "created_at=CURRENT_TIMESTAMP-interval '2 hours',"
+            "expires_at=CURRENT_TIMESTAMP+$3::interval WHERE id=$4",
             request_status,
             moderation,
             timedelta(hours=-1 if overdue else 1),
+            request_id,
         )
+    return request_id
 
 
 @pytest.mark.parametrize(
@@ -63,7 +74,7 @@ async def test_expire_only_overdue_active_requests(
     request_id = await seed_request(
         workflow, request_status, moderation, overdue=overdue
     )
-    assert await expire_requests() == int(expected != request_status)
+    assert await expire_requests() == int(expected == "expired")
     assert await expire_requests() == 0
     async with connection(workflow.campus_url) as conn:
         row = await conn.fetchrow(
@@ -140,8 +151,8 @@ async def test_expiry_respects_prepared_transactions(
                 await conn.execute("ROLLBACK PREPARED " + quoted_gid(gid))
 
 
-async def test_expiry_leaves_rewards_held(workflow: Workflow) -> None:
-    """Expose the expired state while leaving Points and 2PC records alone."""
+async def test_expiry_refunds_unanswered_requests(workflow: Workflow) -> None:
+    """Expose expired status and return the existing hold through 2PC."""
     created = await workflow.client.post(
         ROOT + "/requests",
         json={"location_id": 1, "title": "Seats", "description": "Available?"},
@@ -171,18 +182,18 @@ async def test_expiry_leaves_rewards_held(workflow: Workflow) -> None:
     async with connection(workflow.campus_url) as conn:
         assert (
             await conn.fetchval("SELECT count(*) FROM distributed_transactions")
-            == count
+            == count + 1
         )
     async with connection(workflow.points_url) as conn:
         wallet = await conn.fetchrow("SELECT * FROM wallets WHERE user_id=1")
-        assert wallet["available_points"] == 95  # noqa: PLR2004
+        assert wallet["available_points"] == 100  # noqa: PLR2004
         assert wallet["reputation"] == 0
         assert (
             await conn.fetchval(
                 "SELECT status FROM escrows WHERE request_id=$1", request_id
             )
-            == "held"
+            == "refunded"
         )
         assert (
-            await conn.fetchval("SELECT count(*) FROM points_transactions") == 1
+            await conn.fetchval("SELECT count(*) FROM points_transactions") == 2  # noqa: PLR2004
         )

@@ -88,7 +88,11 @@ async def coordinator_record(transaction_id: UUID) -> dict[str, str | None]:
             operation = body.get("operation", "create_request")
             if (
                 decision is None or decision in {"commit", "abort"}
-            ) and operation in {"create_request", "accept_response"}:
+            ) and operation in {
+                "create_request",
+                "accept_response",
+                "expire_request",
+            }:
                 return {"decision": decision, "operation": operation}
             raise protocol_error(code="service_unavailable", status_code=503)
         except (httpx.HTTPError, ValueError, KeyError) as exc:

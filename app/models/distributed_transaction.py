@@ -3,7 +3,17 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, String, Uuid, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Uuid,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.db import Base
@@ -14,6 +24,21 @@ class DistributedTransaction(Base):
     """Store an operation, its owner, and its idempotency details."""
 
     __tablename__ = "distributed_transactions"
+    __table_args__ = (
+        Index(
+            "uq_distributed_transactions_expiry_request",
+            "request_id",
+            unique=True,
+            postgresql_where=text(
+                "operation = 'expire_request' AND "
+                "(state != 'finished' OR decision = 'commit')"
+            ),
+            sqlite_where=text(
+                "operation = 'expire_request' AND "
+                "(state != 'finished' OR decision = 'commit')"
+            ),
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     owner_id: Mapped[int] = mapped_column(

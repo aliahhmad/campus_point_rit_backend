@@ -9,9 +9,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from app.config.settings import get_settings
 from app.database.db import get_database_url
 from app.managers.acceptance_participant import prepare_acceptance
+from app.managers.expiration_participant import prepare_expiration
 from app.managers.request_participant import finish_request, prepare_request
 from app.transactions.postgres import connection, protocol_error
-from app.transactions.schemas import AcceptancePreparation, RequestPreparation
+from app.transactions.schemas import (
+    AcceptancePreparation,
+    ExpiryPreparation,
+    RequestPreparation,
+)
 
 
 def require_service_token(
@@ -61,6 +66,15 @@ async def prepare_campus_acceptance(
 ) -> dict[str, str]:
     """Prepare one validated response selection in the Campus database."""
     await prepare_acceptance(transaction_id, payload)
+    return {"result": "yes"}
+
+
+@router.post("/{transaction_id}/prepare-expiry")
+async def prepare_campus_expiry(
+    transaction_id: UUID, payload: ExpiryPreparation
+) -> dict[str, str]:
+    """Prepare guarded expiry as Campus's part of an automatic refund."""
+    await prepare_expiration(transaction_id, payload)
     return {"result": "yes"}
 
 

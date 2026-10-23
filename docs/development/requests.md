@@ -24,7 +24,8 @@ Compose sets these addresses for the service network.
 
 Campus also [expires overdue requests](expiration.md) on startup and every
 60 seconds by default. Configure `REQUEST_EXPIRY_SCAN_INTERVAL_SECONDS` to change
-the interval. This updates Campus statuses; it does not refund held rewards.
+the interval. Unanswered requests expire and refund their held reward through
+2PC; requests with saved responses become `conflicted` and keep the reward held.
 
 ## Public API
 

@@ -38,6 +38,13 @@ class PointsTransaction(Base):
             postgresql_where=text("type = 'reward'"),
             sqlite_where=text("type = 'reward'"),
         ),
+        Index(
+            "uq_points_transactions_refund_escrow",
+            "escrow_id",
+            unique=True,
+            postgresql_where=text("type = 'refund'"),
+            sqlite_where=text("type = 'refund'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
