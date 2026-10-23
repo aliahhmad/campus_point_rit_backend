@@ -96,7 +96,10 @@ async def assert_settlement(
             REQUESTER_BALANCE,
             REWARDED_BALANCE if rewarded else INITIAL_BALANCE,
         ]
-        assert [row["reputation"] for row in wallets] == [0, 0]
+        assert [row["reputation"] for row in wallets] == [
+            0,
+            1 if rewarded else 0,
+        ]
         escrow = await conn.fetchrow(
             "SELECT * FROM escrows WHERE request_id=$1", selected.request_id
         )
@@ -126,7 +129,7 @@ async def assert_settlement(
 async def test_acceptance_and_exact_retries(
     workflow: Workflow, selection: Selection
 ) -> None:
-    """Complete the request and pay its existing hold exactly once."""
+    """Award the existing hold and one reputation point exactly once."""
     first = await workflow.client.post(selection.url, headers=HEADERS)
     assert first.status_code == status.HTTP_200_OK, first.text
     body = first.json()
@@ -175,6 +178,52 @@ async def test_acceptance_and_exact_retries(
                 "operation": "accept_response",
                 "state": "committed",
             }
+
+
+async def test_reputation_accumulates_across_accepted_responses(
+    workflow: Workflow, selection: Selection
+) -> None:
+    """Each distinct accepted answer adds one to existing reputation."""
+    async with connection(workflow.points_url) as conn:
+        await conn.execute(
+            "UPDATE wallets SET reputation=CASE user_id WHEN 1 THEN 4 "
+            "ELSE 7 END"
+        )
+    parent = await workflow.client.post(
+        ROOT + "/requests",
+        json={
+            "location_id": 1,
+            "title": "Another request",
+            "description": "Seats?",
+        },
+        headers={"Idempotency-Key": "another-reputation-request"},
+    )
+    assert parent.status_code == status.HTTP_201_CREATED, parent.text
+    request_id = parent.json()["request"]["id"]
+    authenticate(workflow, 2)
+    answer = await workflow.client.post(
+        ROOT + f"/requests/{request_id}/responses",
+        json={"answer": "Third floor."},
+        headers={"Idempotency-Key": "another-reputation-answer"},
+    )
+    assert answer.status_code == status.HTTP_201_CREATED, answer.text
+    authenticate(workflow, 1)
+    second = Selection(request_id, answer.json()["response"]["id"])
+    for count, selected in enumerate((selection, second), start=1):
+        headers = {"Idempotency-Key": f"reputation-reward-{count}"}
+        for _ in range(2):
+            accepted = await workflow.client.post(selected.url, headers=headers)
+            assert accepted.status_code == status.HTTP_200_OK, accepted.text
+            async with connection(workflow.points_url) as conn:
+                wallets = await conn.fetch(
+                    "SELECT available_points,reputation FROM wallets "
+                    "ORDER BY user_id"
+                )
+                assert [row["available_points"] for row in wallets] == [
+                    INITIAL_BALANCE - 10,
+                    INITIAL_BALANCE + 5 * count,
+                ]
+                assert [row["reputation"] for row in wallets] == [4, 7 + count]
 
 
 @pytest.mark.parametrize(
@@ -629,6 +678,13 @@ async def test_competing_response_selections(
         )
         assert len(rewards) == 1
         assert rewards[0]["user_id"] == escrow["recipient_id"]
+        wallets = await conn.fetch(
+            "SELECT user_id,reputation FROM wallets ORDER BY user_id"
+        )
+        assert [row["reputation"] for row in wallets] == [
+            1 if row["user_id"] == escrow["recipient_id"] else 0
+            for row in wallets
+        ]
         assert (
             await conn.fetchval("SELECT sum(available_points) FROM wallets")
             == INITIAL_BALANCE * 3

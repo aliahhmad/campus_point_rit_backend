@@ -14,7 +14,7 @@ async def award_response_points(
     transaction_id: UUID,
     payload: AcceptancePreparation,
 ) -> None:
-    """Settle the escrow, credit the recipient, and write one ledger entry."""
+    """Settle escrow, credit points and reputation, and record the reward."""
     escrow = await conn.fetchrow(
         "SELECT * FROM escrows WHERE request_id=$1 FOR UPDATE",
         payload.request_id,
@@ -35,7 +35,8 @@ async def award_response_points(
     if wallet is None:
         raise protocol_error(code="recipient_wallet_missing", status_code=503)
     await conn.execute(
-        "UPDATE wallets SET available_points=available_points+$2 "
+        "UPDATE wallets SET available_points=available_points+$2,"
+        "reputation=reputation+1 "
         "WHERE user_id=$1",
         payload.contributor_id,
         escrow["amount"],

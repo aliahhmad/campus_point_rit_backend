@@ -3,7 +3,8 @@
 Only the request owner can select a response. Campus and Points coordinate this
 action with the same native PostgreSQL two-phase commit used for request
 creation. A successful acceptance completes the request and transfers its
-existing five-point escrow to the selected contributor.
+existing five-point escrow to the selected contributor, adding one to that
+contributor's reputation in the same transaction.
 
 ## Frontend API
 
@@ -111,8 +112,9 @@ operation returns its `error_code` with `status: "aborted"`.
    `accepted_response_id`, and `accepted_at`, and prepares the transaction.
 3. Points locks the existing escrow and recipient wallet with `FOR UPDATE`.
    In one transaction it adds the escrow amount to the contributor's available
-   points, marks the escrow `released` with its recipient, awarded response and
-   settlement time, inserts a `reward` ledger entry, and prepares those changes.
+   points and increments their reputation by one, marks the escrow `released`
+   with its recipient, awarded response and settlement time, inserts a `reward`
+   ledger entry, and prepares those changes.
 4. Campus durably records COMMIT only after both Yes votes. Any No vote records
    ABORT. It then replays that immutable decision until both acknowledge.
 5. The API reports completion only after both acknowledgements are durable.
@@ -120,9 +122,12 @@ operation returns its `error_code` with `status: "aborted"`.
 The requester already spent five available points when creating the request.
 Acceptance does not debit them again or create another escrow. With two wallets
 starting at 100, request creation leaves 95 and 100 available plus a five-point
-hold; acceptance leaves 95 and 105 available with no held reward. Reputation is
-unchanged. A missing recipient wallet aborts the selection; it does not issue a
-new opening grant.
+hold; acceptance leaves 95 and 105 available with no held reward. The selected
+contributor gains one reputation point; the requester's reputation stays the
+same. Each distinct accepted response adds another reputation point. Retries,
+decision replay, and polling do not award additional points or reputation, and
+an aborted transaction rolls both increments back. A missing recipient wallet
+aborts the selection; it does not issue a new opening grant.
 
 The request row lock prevents competing winners, the escrow row lock prevents
 competing settlements, and a partial unique index allows at most one `reward`
