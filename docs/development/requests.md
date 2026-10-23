@@ -22,6 +22,10 @@ Both APIs must have the same nonempty `POINTS_SERVICE_TOKEN`. Campus uses
 Campus decisions; include the Campus `API_ROOT` in that URL if configured.
 Compose sets these addresses for the service network.
 
+Campus also [expires overdue requests](expiration.md) on startup and every
+60 seconds by default. Configure `REQUEST_EXPIRY_SCAN_INTERVAL_SECONDS` to change
+the interval. This updates Campus statuses; it does not refund held rewards.
+
 ## Public API
 
 Use the existing JWT or API-key authentication. Include `API_ROOT` in Campus

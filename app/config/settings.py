@@ -75,6 +75,8 @@ class Settings(BaseSettings):
         "bitch,asshole,bastard,cunt,dickhead"
     )
 
+    request_expiry_scan_interval_seconds: int = Field(default=60, gt=0)
+
     cors_origins: str = "*"
 
     # Setup the Postgresql database.

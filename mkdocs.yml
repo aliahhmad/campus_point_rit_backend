@@ -93,6 +93,7 @@ nav:
       - Initialize Wallets: development/wallets.md
       - Response API: development/responses.md
       - Accept Responses and Release Rewards: development/acceptance.md
+      - Automatic Request Expiry: development/expiration.md
       - Documentation: development/documentation.md
   - Project Organization: project-organization.md
   - Tutorials: tutorials.md

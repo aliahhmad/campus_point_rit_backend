@@ -122,6 +122,7 @@ async def workflow(
         )
     for module in (
         "app.managers.coordinator",
+        "app.managers.expiration",
         "app.managers.acceptance_participant",
         "app.managers.request_participant",
         "app.managers.response_participant",

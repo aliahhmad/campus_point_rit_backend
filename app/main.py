@@ -27,6 +27,7 @@ from app.config.openapi import custom_openapi
 from app.config.settings import check_secrets_dir, get_settings, unwrap_secret
 from app.database.db import async_session
 from app.managers.coordinator import recovery_loop
+from app.managers.expiration import expiration_loop
 from app.metrics.instrumentator import register_metrics
 from app.middleware.cache_logging import CacheLoggingMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
@@ -71,6 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, None]:
     Currently we:
     - Ensure the database is available and configured properly
     - Initialize the cache backend (Redis or in-memory)
+    - Start transaction recovery and periodic request expiry scans
     """
     # Initialize loguru logging within the server process.
     get_log_config()
@@ -145,7 +147,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, None]:
     else:
         logger.info("Caching is disabled (CACHE_ENABLED=false).")
 
-    async with running_recovery(recovery_loop):
+    async with (
+        running_recovery(recovery_loop),
+        running_recovery(expiration_loop),
+    ):
         yield
 
     # Ensure loguru queue is drained before shutdown to avoid warnings.
