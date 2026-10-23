@@ -1,107 +1,48 @@
-# User Management
+# User management and authentication
 
-## Overview
+Campus provides registration, email verification, login, access-token refresh,
+password recovery, profile editing, and administrator account controls.
+Paths below include `API_ROOT` when configured.
 
-This template provides multiple ways to manage users:
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/register/` | Register and initialize a one-time funded wallet |
+| POST | `/login/` | Exchange email/password for access and refresh tokens |
+| POST | `/refresh/` | Obtain a new access token using the refresh token |
+| GET | `/verify/` | Verify an account using its emailed token |
+| POST | `/forgot-password/` | Request a password-reset email |
+| GET / POST | `/reset-password/` | Reset form/redirect and reset submission |
+| GET | `/users/me` | Read authenticated profile name and email |
+| GET | `/users/` | Administrator user list or one user through `user_id` |
+| GET | `/users/search` | Administrator account search |
+| PUT | `/users/{user_id}` | Edit an authorized user's profile |
+| POST | `/users/{user_id}/password` | Change an authorized user's password |
+| POST | `/users/{user_id}/make-admin` | Grant administrator role |
+| POST | `/users/{user_id}/ban` | Ban an account |
+| POST | `/users/{user_id}/unban` | Unban an account |
+| DELETE | `/users/{user_id}` | Administrator deletion, subject to constraints |
 
-- **CLI Tools** - For administrative tasks via command line
-- **API Endpoints** - For programmatic user management
+Use the running [Swagger UI](../reference/swagger.md) for exact payloads,
+parameters, and response models. `/users/` returns a paginated object when no
+`user_id` is supplied, and one account when it is supplied.
 
-Both approaches offer full user management capabilities, but with different use cases and trade-offs.
+Profile and administrator user responses include the read-only `violations`
+counter. Newly committed requests or responses hidden by moderation add one;
+visible/pending content and retries do not. Existing users start at zero when
+the migration is applied.
 
-## CLI User Management
+JWT authentication uses `Authorization: Bearer <access-token>`. Refresh tokens
+are separate from access tokens and must be sent to `/refresh/`; unverified or
+banned users cannot use protected APIs. Access tokens default to 120 minutes;
+refresh tokens last 30 days. Verification tokens last 10 minutes and password
+reset tokens 30 minutes.
 
-The command-line interface provides powerful administrative tools for managing users directly on the server.
+The backend also supports [API-key authentication](api-keys.md). React stores
+its session and unresolved submission keys in browser session storage and uses
+JWT access/refresh tokens. Admin navigation derives from the server-side role;
+the backend authorizes each actual action.
 
-### Creating Users
-
-See: [Add a User](add-user.md) for detailed instructions on creating users via CLI using the `api-admin user create` command.
-
-**Quick example:**
-```bash
-# Create an admin user interactively
-api-admin user create --admin
-
-# Create a regular user with all details
-api-admin user create -e user@example.com -f John -l Doe -p SecurePass123
-```
-
-### Managing Existing Users
-
-See: [User Control via CLI](user-control.md) for comprehensive CLI operations including:
-
-- **Listing users** - View all users in a table
-- **Searching users** - Find users by email, name, or all fields
-- **Verifying users** - Manually verify user email addresses
-- **Banning/unbanning users** - Restrict or restore user access
-- **Making users admin** - Grant or remove admin privileges
-- **Deleting users** - Permanently remove users (with safeguards)
-- **Seeding from CSV** - Import users from a CSV file
-- **Populating with test data** - Generate random test users
-
-## API User Management
-
-The REST API provides programmatic access to user management, enabling remote administration and frontend integration.
-
-### Available Endpoints
-
-The API provides comprehensive user management capabilities. See [API Reference - User Management Endpoints](../reference/api.md#user-management-endpoints) for complete documentation of:
-
-- `GET /users/me` - Get current user profile
-- `GET /users/` - List all users (admin only)
-- `GET /users/search` - Search users with filters (admin only)
-- `PUT /users/{user_id}` - Edit user profile
-- `POST /users/{user_id}/password` - Change password
-- `POST /users/{user_id}/make-admin` - Grant admin role (admin only)
-- `POST /users/{user_id}/ban` - Ban user (admin only)
-- `POST /users/{user_id}/unban` - Unban user (admin only)
-- `DELETE /users/{user_id}` - Delete user (admin only)
-
-### Authentication
-
-API endpoints require authentication via:
-
-- **JWT Bearer Token** - Obtained from `/login/` endpoint
-- **API Key** - Created via `/users/keys` endpoint
-
-See the [Quick Start Guide](../quick-start.md#6-authenticate-to-access-protected-endpoints) for authentication setup.
-
-## CLI vs API Comparison
-
-| Operation | CLI Command | API Endpoint |
-|-----------|-------------|--------------|
-| Create user | `api-admin user create` | `POST /register/` |
-| List users | `api-admin user list` | `GET /users/` |
-| Search users | `api-admin user search` | `GET /users/search` |
-| Get user details | `api-admin user show {id}` | `GET /users/?user_id={id}` |
-| Edit user | N/A (delete + recreate) | `PUT /users/{id}` |
-| Change password | N/A | `POST /users/{id}/password` |
-| Verify user | `api-admin user verify {id}` | N/A (automatic via email) |
-| Make admin | `api-admin user admin {id}` | `POST /users/{id}/make-admin` |
-| Remove admin | `api-admin user admin {id} -r` | N/A |
-| Ban user | `api-admin user ban {id}` | `POST /users/{id}/ban` |
-| Unban user | `api-admin user ban {id} -u` | `POST /users/{id}/unban` |
-| Delete user | `api-admin user delete {id}` | `DELETE /users/{id}` |
-
-### CLI Advantages
-
-- **Quick administrative tasks** - Ideal for one-off operations
-- **No authentication required** - Direct database access
-- **Users automatically verified** - Skip email verification step
-- **Batch operations** - Seed from CSV, populate with test data
-- **Server access only** - Must have shell/SSH access
-
-### API Advantages
-
-- **Programmatic access** - Automate user management
-- **Remote management** - No server access required
-- **Frontend integration** - Build admin panels and UIs
-- **Authentication/authorization** - Role-based access control
-- **Distributed systems** - Manage users across multiple services
-
-## Next Steps
-
-- **[Add a User](add-user.md)** - Create your first user via CLI
-- **[User Control via CLI](user-control.md)** - Learn all CLI user management commands
-- **[API Reference](../reference/api.md)** - Explore the complete API documentation
-- **[Quick Start Guide](../quick-start.md)** - Get started with the template
+Profile edit payloads include a password field; it is a replacement value, not a
+current-password verification challenge. Use the separate password endpoint for
+an explicit password change. No public resend-verification route is currently
+registered. Local demos can use [CLI verification](add-user.md).

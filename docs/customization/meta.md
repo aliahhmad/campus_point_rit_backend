@@ -1,83 +1,52 @@
-# Metadata
+# CampusPoint metadata
 
-## Customize the Metadata
+Metadata controls display information in Swagger, HTML/email contexts, CLI
+output, and the documentation site. These sources are separate:
 
-By default the Template Title, Description, Author and similar is set to my
-details. Changing this is very easy though, and there are 2 ways you can do.
+| Source | Controls |
+| --- | --- |
+| `backend/.env` | Campus settings such as `API_TITLE`, `API_DESCRIPTION`, `REPOSITORY`, `FRONTEND_URL`, and sender name |
+| `app/config/metadata.py` | Fallback title, description, repository, contact, license, and year |
+| `pyproject.toml` | Package name, version, description, and CLI project details |
+| `mkdocs.yml` | Documentation site title, navigation, and repository link |
 
-### Manually
+## Set the application display values
 
-Metadata is stored in the `app/config/metadata.py` file and this
-can be edited by hand if desired:
-
-```python
-from app.config.helpers import MetadataBase
-
-custom_metadata = MetadataBase(
-    title="API Template",
-    name="api-template",
-    description="Run 'api-admin custom metadata' to change this information.",
-    repository="https://github.com/seapagan/fastapi-template",
-    license_info={
-        "name": "MIT",
-        "url": "https://opensource.org/licenses/MIT",
-    },
-    contact={
-        "name": "Grant Ramsay (seapagan)",
-        "url": "https://www.gnramsay.com",
-    },
-    email="seapagan@gmail.com",
-    year="2026",
-)
+```env
+API_TITLE=CampusPoint
+API_DESCRIPTION=Campus requests, responses, escrowed rewards, and distributed settlement.
+REPOSITORY=https://github.com/aliahhmad/campus_point_rit_backend
+MAIL_FROM_NAME=CampusPoint RIT
+FRONTEND_URL=http://localhost:5173
 ```
 
-You can change the values in this dictionary as needed. You should also change
-the name, description and authors in the `pyproject.toml` file.
+Use the deployed frontend address for hosted demos. Recreate the API containers
+after environment changes. Points has its own `CampusPoint Points API` title;
+these Campus settings do not rename the Points application.
 
-For the License URL, you can find a list in the
-`config/helpers.py`
+## Fallback metadata
 
-### Using the provided configuration tool
+The checked-in fallback module and package metadata still contain values
+inherited from the original FastAPI foundation. Environment overrides control
+the configured Campus title; the fallback values are not the project's
+maintainer contact details.
 
-The `api-admin` command can also do this for you, asking for the values at the
-command line and automatically updating both files:
+When updating the fallback module, keep the `MetadataBase` fields expected by
+`app/config/helpers.py`. Use CampusPoint's title/description and this project's
+repository. Supply an actual maintainer contact only when one is established;
+do not reuse the upstream author's contact as CampusPoint support information.
+Preserve the upstream MIT copyright and license notices in `LICENSE.txt`.
 
-```console
-$ api-admin custom metadata
-╭───────────────────────────────────────╮
-│ api-template configuration tool 0.6.0 │
-╰───────────────────────────────────────╯
-Enter your API title [API Template]:
-Enter the project Name [api-template]:
-Enter the description [Run 'api-admin custom metadata' to change this information.]:
-Version Number (use * to reset to '0.0.1') [0.5.4]:
-URL to your Repository [https://github.com/seapagan/fastapi-template]:
+The optional interactive tool is:
 
-Choose a license from the following options:
-Apache2, BSD3, BSD2, GPL, LGPL, MIT, MPL2, CDDL, EPL
-Your Choice of License? [MIT]:
-
-Author name or handle [Grant Ramsay (seapagan)]:
-Contact Email address [seapagan@gmail.com]:
-Author Website [https://www.gnramsay.com]:
-
-You have entered the following data:
-Title       : API Template
-Name        : api-template
-Description : Run 'api-admin custom metadata' to change this information.
-Version     : 0.5.4
-Repository  : https://github.com/seapagan/fastapi-template
-License     : MIT
-Author      : Grant Ramsay (seapagan)
-Email       : seapagan@gmail.com
-Website     : https://www.gnramsay.com
-(C) Year    : 2026
-
-Is this Correct? [Y/n]:
-
--> Writing out Metadata .... Done!
-
--> Remember to RESTART the API if it is running.
+```sh
+docker compose exec campus-api api-admin custom metadata
 ```
 
-This will also put in the correct License URL link automatically.
+This tool rewrites both `app/config/metadata.py` and package metadata in
+`pyproject.toml`. Review its output and changes before committing them. Updating
+application display metadata does not configure a deployment address, change
+service ownership, or alter the 2PC protocol.
+
+See [email templates](templates.md) for the template variables and
+[environment configuration](../usage/configuration/environment.md) for URLs.

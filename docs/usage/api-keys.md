@@ -1,78 +1,33 @@
-# API Keys
+# Backend API keys
 
-## Overview
+API-key support remains in Campus even though the React frontend no longer
+includes key-management pages or links. Keys identify a user and are sent as:
 
-In version `0.7.0` we implemented **API Keys**. These can be created by a
-registered user and (currently) do not expire.
-
-These can be used in place of the standard JWT token for API access and are sent
-using the `X-API-Key` header (Not the `Authorization` header like the JWT).
-
-For example, to access a protected endpoint using an API Key:
-
-```terminal
-curl -H "X-API-Key: your-api-key-here" http://localhost:8000/api/v1/protected-endpoint
+```http
+X-API-Key: <your-key>
 ```
 
-!!! note
-    If you send both an API Key and JWT, the **JWT** is used. If that is invalid
-    or expired, authentication will fail even if the API key is valid. So, just
-    use the one type!
+For example, call `GET http://localhost:8001/wallet/me` with that header.
+Include `API_ROOT` in the URL if configured. Use one authentication method per
+request; the dependency checks JWT authentication before falling back to keys.
 
-## Implementation
+## Management endpoints
 
-To use API keys, your routes must use the new `get_current_user` dependency
-instead of the `oauth2_schema` dependency.
+| Method | Path | Permission |
+| --- | --- | --- |
+| GET / POST | `/users/keys` | Own keys; list or create |
+| GET / PATCH / DELETE | `/users/keys/{key_id}` | Own key; inspect, rename/toggle, or delete |
+| GET | `/users/keys/by-user/{user_id}` | Administrator list of another user's keys |
+| PATCH / DELETE | `/users/keys/by-user/{user_id}/{key_id}` | Administrator update or deletion |
 
-For example, in your route:
+Only creation returns the raw key. Store it securely; later reads return metadata
+rather than the secret. Keys are stored hashed, can be deactivated or deleted,
+and currently have no expiration time. An administrator cannot create a key for
+another account through these endpoints.
 
-```python
-from typing import Annotated
+Keys retain the authenticated user's role and account restrictions. The stored
+`scopes` list does not currently implement a separate fine-grained authorization
+policy. See Swagger for validated creation/update shapes and key IDs.
 
-from fastapi import APIRouter, Depends
-from app.managers.security import get_current_user
-
-router = APIRouter()
-
-
-@router.get("/protected-endpoint")
-async def protected_endpoint(
-    current_user: Annotated[User, Depends(get_current_user)],
-):
-    return {"message": "Hello World"}
-```
-
-Now, you can access this route using an **API Key** OR a **JWT** token.
-
-## Routes
-
-There are 5 routes for managing API Keys and are **USER Specific**:
-
-1. **List All API Keys** - `GET /users/keys/`
-2. **Create a new API Key** - `POST /users/keys/`
-3. **Get a single API Key** - `GET /users/keys/{key_id}`
-4. **Update a single API Key** - `PATCH /users/keys/{key_id}`
-5. **Delete a single API Key** - `DELETE /users/keys/{key_id}`
-
-There are also 3 related routes that can only be accessed by an admin user:
-
-1. **List API Keys for a specific user** - `GET /users/keys/by-user/{user_id}`
-2. **Update another user's API key** - `PATCH /users/keys/by-user/{user_id}/{key_id}`
-3. **Delete another user's API key** - `DELETE /users/keys/by-user/{user_id}/{key_id}`
-
-!!! danger
-    The `POST` route will return the API Key in the response. **This is
-    the only time the key is shown**. If you lose it, you will have to delete
-    and create a new one. **The API key is stored hashed in the database and
-    cannot be retrieved by any means**.
-
-I'll try to start writing more detailed documentation on these routes soon, but
-for now you can see how they work using the integrated Swagger UI at `/docs` in
-the browser. They are pretty self-evident - the update route can change the name
-and enable/disable the key (or both).
-
-## Permissions
-
-Currently the API keys are just blanket permissions. They can access any
-endpoint that a registered user can access. We will be adding more granular
-permissions in the future.
+Internal Points APIs use `X-Service-Token`, not public user API keys. Never place
+that internal credential in a browser build.

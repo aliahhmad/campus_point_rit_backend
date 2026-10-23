@@ -1,0 +1,1 @@
+"""Points-only migration environment."""

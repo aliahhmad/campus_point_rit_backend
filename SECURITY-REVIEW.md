@@ -1,4 +1,11 @@
-# Project Review Notes
+# Historical review notes
+
+This inherited review is retained for provenance. Its findings, status markers,
+line numbers, and coverage claims are not a current CampusPoint security audit.
+Verify any issue against the current implementation and report it privately
+under [the project policy](SECURITY.md).
+
+## Original project review notes
 
 ## ⚠️ CRITICAL Security Issues (Fix Immediately)
 
@@ -650,7 +657,7 @@
 
 ## Summary
 
-**Total Issues Identified: 33**
+Total Issues Identified: 33
 
 | Priority     | Count         | Must Fix Before Production?         |
 |--------------|---------------|-------------------------------------|

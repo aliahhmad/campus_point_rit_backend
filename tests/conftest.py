@@ -6,6 +6,7 @@ import asyncio
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -26,6 +27,15 @@ from app.config.helpers import get_project_root
 from app.database.db import Base, get_database, get_database_url
 from app.main import app
 from app.managers.email import EmailManager
+
+
+@pytest.fixture(autouse=True)
+def points_wallet(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Keep Campus tests independent of the external Points Service."""
+    initialize = AsyncMock()
+    monkeypatch.setattr("app.managers.user.initialize_wallet", initialize)
+    return initialize
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator

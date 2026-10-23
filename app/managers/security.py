@@ -7,7 +7,9 @@ from fastapi.requests import Request
 
 from app.managers.api_key import api_key_scheme
 from app.managers.auth import oauth2_schema
+from app.models.enums import RoleType
 from app.models.user import User
+from app.transactions.postgres import protocol_error
 
 
 async def get_current_user(
@@ -33,4 +35,13 @@ async def get_optional_user(
     current_user: Annotated[User | None, Depends(get_current_user)],
 ) -> User | None:
     """Get the current user if authenticated, otherwise return None."""
+    return current_user
+
+
+async def get_admin_user(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Require the authenticated user's current administrator role."""
+    if current_user.role != RoleType.admin:
+        raise protocol_error(code="admin_required", status_code=403)
     return current_user

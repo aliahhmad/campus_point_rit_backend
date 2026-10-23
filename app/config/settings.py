@@ -59,12 +59,23 @@ class Settings(BaseSettings):
     project_root: Path = get_project_root()
 
     env_file: str = str(project_root / ".env")
-    model_config = SettingsConfigDict(env_file=env_file)
+    # Campus and Points share a development .env, with distinct settings.
+    model_config = SettingsConfigDict(env_file=env_file, extra="ignore")
 
     base_url: str = "http://localhost:8000"
     frontend_url: str | None = None
+    points_api_url: str = "http://localhost:8003"
+    points_service_token: SecretStr = SecretStr("")
     api_root: str = ""
     no_root_route: bool = False
+
+    # Comma-separated words that hide new requests from the campus feed.
+    moderation_blocked_words: str = (
+        "fuck,fucking,fucker,motherfucker,shit,bullshit,"
+        "bitch,asshole,bastard,cunt,dickhead"
+    )
+
+    request_expiry_scan_interval_seconds: int = Field(default=60, gt=0)
 
     cors_origins: str = "*"
 

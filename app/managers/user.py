@@ -22,6 +22,7 @@ from app.database.helpers import (
 from app.logs import LogCategory, category_logger
 from app.managers.auth import VERIFY_TOKEN_EXPIRE_MINUTES, AuthManager
 from app.managers.email import EmailManager
+from app.managers.points import initialize_wallet
 from app.metrics import increment_login_attempt
 from app.models.enums import RoleType
 from app.models.user import User
@@ -142,6 +143,9 @@ class UserManager:
         # will always return a User object in  this case (we have just created
         # it without an exception, so it must exist)
         assert user_do  # noqa: S101
+
+        # Registration succeeds only after Points confirms the wallet exists.
+        await initialize_wallet(user_do.id)
 
         if background_tasks:
             email = EmailManager()

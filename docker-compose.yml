@@ -1,29 +1,91 @@
+# Local development: two APIs, each owning its own PostgreSQL database.
 services:
-  api:
-    image: fastapi-template:dev
+  campus-api:
+    container_name: campuspoint-campus-api
+    image: campuspoint-campus-api:dev
     build:
       context: .
-      target: dev
-    command: bash -c "uv run alembic upgrade head && uvicorn app.main:app --host
-      0.0.0.0 --port 8001 --reload"
+      target: campus-api
+    command: >-
+      sh -c "uv run --locked alembic upgrade head &&
+      exec uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload"
     volumes:
-      - .:/app/
+      - .:/app
       - /app/.venv
     env_file:
       - .env
     environment:
-      - DB_ADDRESS=postgres
+      DB_ADDRESS: campus-db
+      DB_PORT: "5432"
+      POINTS_API_URL: http://points-api:8003
     ports:
-      - 8001:8001
+      - "127.0.0.1:8001:8001"
     networks:
-      - api-network
+      - service-network
+      - campus-data-network
     depends_on:
-      db:
+      campus-db:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import os, urllib.request;
+          urllib.request.urlopen('http://localhost:8001' +
+          os.environ.get('API_ROOT', '').rstrip('/') + '/heartbeat', timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
 
-  db:
+  points-api:
+    container_name: campuspoint-points-api
+    image: campuspoint-points-api:dev
+    build:
+      context: .
+      target: points-api
+    command: >-
+      sh -c "uv run --locked alembic -c alembic-points.ini upgrade head &&
+      exec uvicorn app.points.main:app --host 0.0.0.0 --port 8003 --reload"
+    volumes:
+      - .:/app
+      - /app/.venv
+    environment:
+      POINTS_DB_USER: ${POINTS_DB_USER:-campuspoint_points}
+      POINTS_DB_PASSWORD: ${POINTS_DB_PASSWORD:?Set POINTS_DB_PASSWORD in .env}
+      POINTS_DB_NAME: ${POINTS_DB_NAME:-campuspoint_points}
+      POINTS_DB_ADDRESS: points-db
+      POINTS_DB_PORT: "5432"
+      POINTS_SERVICE_TOKEN: ${POINTS_SERVICE_TOKEN:?Set POINTS_SERVICE_TOKEN in .env}
+      POINTS_CAMPUS_API_URL: http://campus-api:8001${API_ROOT:-}
+    # Published on loopback for local Swagger access; React still uses Campus.
+    ports:
+      - "127.0.0.1:8003:8003"
+    networks:
+      - service-network
+      - points-data-network
+    depends_on:
+      points-db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://localhost:8003/ready', timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
+
+  campus-db:
+    container_name: campuspoint-campus-db
     image: postgres:18.1-bookworm
-    hostname: postgres
+    command: ["postgres", "-c", "max_prepared_transactions=100"]
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
@@ -31,35 +93,46 @@ services:
       POSTGRES_TEST_DB: ${TEST_DB_NAME}
       PGDATA: /var/lib/postgresql/18/docker
     volumes:
-      - api-db-data:/var/lib/postgresql/18/data
-      - ./docker_support/create-test-db.sh:/docker-entrypoint-initdb.d/create-test-db.sh
+      - campus-db-data:/var/lib/postgresql
+      - ./docker_support/create-test-db.sh:/docker-entrypoint-initdb.d/create-test-db.sh:ro
     ports:
-      - 5433:${DB_PORT}
+      - "127.0.0.1:5433:5432"
     networks:
-      - api-network
+      - campus-data-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 2s
       timeout: 3s
       retries: 40
 
-  cache:
-    image: redis/redis-stack:latest
-    restart: always
+  points-db:
+    container_name: campuspoint-points-db
+    image: postgres:18.1-bookworm
+    command: ["postgres", "-c", "max_prepared_transactions=100"]
+    environment:
+      POSTGRES_USER: ${POINTS_DB_USER:-campuspoint_points}
+      POSTGRES_PASSWORD: ${POINTS_DB_PASSWORD:?Set POINTS_DB_PASSWORD in .env}
+      POSTGRES_DB: ${POINTS_DB_NAME:-campuspoint_points}
+      PGDATA: /var/lib/postgresql/18/docker
     ports:
-      - "6379:6379"
-      - "8002:8001"
+      - "127.0.0.1:5434:5432"
     volumes:
-      - cache:/data
+      - points-db-data:/var/lib/postgresql
     networks:
-      - api-network
+      - points-data-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 40
 
 volumes:
-  api-db-data:
-    name: api-db-data
-  cache:
-    driver: local
+  campus-db-data:
+    name: campuspoint-campus-db-data
+  points-db-data:
+    name: campuspoint-points-db-data
 
 networks:
-  api-network:
-    name: fastapi-network
+  service-network:
+  campus-data-network:
+  points-data-network:
